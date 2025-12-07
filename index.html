@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EKG – Schüler Trainer</title>
+  <style>
+    /* ===== Farbwelt: klares Medizin‑Blau, hohe Lesbarkeit, ruhiger Kontrast ===== */
+    :root{
+      --bg:#08152c;         /* tiefer Hintergrund */
+      --bg2:#0b1e3a;        /* Vollflächen-Hintergrund (konstant, kein Verlauf) */
+      --surface:#0e2a57;    /* Flächenblau */
+      --card:#0f2f62;       /* Karten */
+      --ink:#e9eef9;        /* Primärtext */
+      --muted:#b7c3d9;      /* Sekundärtext */
+      --line:#1d4d9b;       /* Umrandungen */
+      --accent:#58a9ff;     /* UI-Akzent (helles Blau) */
+      --accent-2:#22c55e;   /* Bestätigen */
+      --danger:#ff6b6b;     /* Fehler */
+      --ok:#2bb673;         /* OK/Hinweise */
+      --warn:#f59e0b;       /* Warnung */
+    }
+
+    *{box-sizing:border-box}
+    html{min-height:100%; background: var(--bg2);} 
+    body{min-height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;background:transparent;color:var(--ink)}
+
+    /* ===== Header: ruhig, mit EKG-Linie als thematisches Element ===== */
+    header{position:static;background:rgba(8,21,44,.86);border-bottom:1px solid var(--line)}
+    .wrap{max-width:1180px;margin:0 auto;padding:14px 16px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:space-between}
+    .title{font-size:20px;margin:0;font-weight:800;letter-spacing:.2px}
+    .subtle{color:var(--muted);font-size:12px}
+
+    /* EKG Linie */
+    .ecg-bar{position:relative;height:24px;margin-top:8px;border-top:1px solid var(--line);overflow:hidden}
+    .ecg-bar::after{content:"";position:absolute;left:-20%;top:50%;height:2px;width:140%;background:linear-gradient(90deg, transparent 0 5%, var(--accent) 15% 25%, transparent 35% 100%);
+      transform:translateY(-50%);filter:drop-shadow(0 0 6px rgba(88,169,255,.55));animation:run 2.6s linear infinite}
+    @keyframes run{from{left:-40%}to{left:0%}}
+
+    main{padding:20px 16px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 12px 30px rgba(0,0,0,.28)}
+    .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+    select,input[type="file"],input[type="text"],textarea{background:#0b1f41;color:var(--ink);border:1px solid var(--line);border-radius:12px}
+    select,input[type="file"]{padding:10px 12px}
+
+    button{border:none;border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer;background:#0b254f;color:var(--ink);
+      transition:transform .06s ease,opacity .2s ease,background .2s ease,box-shadow .2s ease}
+    button:hover{transform:translateY(-1px);opacity:.96;box-shadow:0 6px 16px rgba(0,0,0,.25)}
+    .btn-accent{background:var(--accent);color:#04182d}
+    .btn-success{background:var(--accent-2);color:#052e16}
+    .btn-ghost{background:transparent;border:1px solid var(--line)}
+    .btn-danger{background:var(--danger);color:#fff}
+
+    .badge{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#0b2146;border:1px solid var(--line);color:var(--muted);font-size:12px}
+    .small{font-size:12px;color:var(--muted)} .muted{color:var(--muted)} .ok{color:var(--ok)} .err{color:var(--danger)}
+    .spacer{height:10px}
+
+    .grid{display:grid;gap:16px}
+    @media (min-width:920px){.grid{grid-template-columns:1fr 2fr}}
+    .grid-1{display:grid;grid-template-columns:1fr;gap:12px}
+
+    textarea{width:100%;min-height:92px;padding:10px}
+    textarea[disabled]{opacity:.65;pointer-events:none}
+    input[disabled]{opacity:.65;pointer-events:none}
+
+    .imgbox{background:#0b1f41;border:1px dashed var(--line);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:10px;justify-content:flex-start;align-items:center;min-height:260px}
+    .imgbox img{max-width:100%;max-height:420px;border-radius:12px;cursor:zoom-in;display:block}
+    .hr{height:1px;background:var(--line);margin:8px 0 12px}
+
+    /* ===== MC-Bereich ===== */
+    .mc{display:none;margin-top:8px;background:#0b2146;border:1px solid var(--line);border-radius:12px;padding:12px}
+    .mc.show{display:block}
+    .mc label{display:block;padding:10px;border:1px solid var(--line);border-radius:10px;margin:8px 0;background:#0a1e3f;cursor:pointer}
+
+    .banner{padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#0b2146;margin-top:10px;display:none}
+    .banner.warn{border-color:var(--warn)} .banner.error{border-color:var(--danger)}
+
+    #diag{margin-top:8px;display:block}
+
+    /* ===== Erklärungskasten – füllt freien Raum im Aside ===== */
+    main .grid > aside.card{ display:flex; flex-direction:column; }
+    main .grid > aside.card > #caseList{ flex:0 0 auto; }
+    #explanationBox{ margin-top:16px; overflow:auto; background:#0b2146; border:1px solid var(--line); border-radius:12px; padding:12px; color:var(--ink); font-size:13px; display:none; flex:1 1 auto; min-height:200px; max-height:none }
+    #explanationBox .title{ font-size:14px; font-weight:bold; margin-bottom:6px; color:var(--ok) }
+    #explanationText{ white-space:pre-wrap; line-height:1.55; overflow-wrap:anywhere; word-break:break-word; }
+
+    /* ===== Intro-Text größer/lesbar ===== */
+    .introText{ font-size:16px; line-height:1.6; color:var(--ink); white-space:pre-wrap; }
+
+    /* ===== Overlays – klar, ohne Glas; starker weißer Rahmen am Dialog ===== */
+    .overlay{ position:fixed; inset:0; z-index:999; display:grid; place-items:center; padding:20px; background:rgba(7,12,20,.94); transition: opacity .25s ease, visibility .25s ease; }
+    .overlay.hidden{ opacity:0; visibility:hidden; pointer-events:none }
+    .scroll-lock{ overflow:hidden; padding-right: var(--sbw, 0px); }
+    .modal{ background:#0e2146; border:4px solid #ffffff; border-radius:18px; padding:22px; max-width:520px; width:100%; box-shadow:0 20px 60px rgba(0,0,0,.5) }
+    .modal h2{margin:.2rem 0 .6rem 0;font-size:18px}
+    .modal p{margin:.1rem 0 1rem 0;color:var(--muted)}
+    label{display:block;margin:10px 0 6px 2px}
+    input[type="text"]{width:100%;border-radius:12px;border:1px solid var(--line);background:#0b1f41;color:var(--ink);padding:12px 14px;outline:none;caret-color:var(--accent);margin-bottom:12px}
+    input[type="text"]::placeholder{ color: var(--muted); opacity:.85 }
+    input[type="text"]:focus{border-color:var(--accent)}
+    .modal .actions{display:flex;gap:12px;justify-content:flex-end;margin-top:20px}
+    .kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;background:#0a1e3f;border:1px solid var(--line);border-bottom-width:2px;padding:1px 6px;border-radius:6px;font-size:12px;color:var(--muted)}
+
+    /* ===== Bildviewer (Zoom) – blaue UI ===== */
+    #imgViewer{position:relative;width:min(96vw,1400px);height:min(90vh,900px);background:#0b2146;border:1px solid var(--line);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.45);overflow:hidden}
+    #imgCanvas{position:absolute;inset:0;cursor:grab}
+    #imgCanvas.grabbing{cursor:grabbing}
+    #imgCanvas img{position:absolute;top:50%;left:50%;transform:translate(calc(-50% + 0px), calc(-50% + 0px)) scale(1);transform-origin:center center;user-select:none;pointer-events:none;max-width:none;max-height:none}
+    .imgControls{position:absolute;right:12px;bottom:12px;display:flex;gap:8px}
+    .imgControls button{background:#0a1e3f;border:1px solid var(--line)}
+    .imgTopBar{position:absolute;left:12px;top:12px;display:flex;gap:8px;align-items:center}
+    .imgTopBar .pill{background:#0a1e3f;border:1px solid var(--line);border-radius:999px;padding:6px 10px;font-size:12px;color:var(--muted)}
+    .closeBtn{position:absolute;top:12px;right:12px}
+
+    /* Profil-Overlay Hintergrund bleibt dunkel, ohne Blur */
+    #overlay{ background:rgba(7,10,16,.96); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="row">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div class="title">EKG – Schüler Trainer</div>
+          <span class="badge" id="nameBadge">Name: –</span>
+          <span class="badge" id="classBadge">Klasse: –</span>
+        </div>
+        <div class="toolbar">
+          <button class="btn-ghost" id="btnProfile">Profil bearbeiten</button>
+          <button class="btn-ghost" id="btnProfileReset">Profil zurücksetzen</button>
+        </div>
+      </div>
+      <div class="ecg-bar" aria-hidden="true"></div>
+      <div class="spacer"></div>
+      <div class="row card" style="gap:10px">
+        <div class="toolbar" style="flex:1 1 auto">
+          <input type="file" id="fileInput" accept="application/json" />
+          <select id="weekSelect"><option value="">Woche wählen…</option></select>
+          <button id="exportEnc" class="btn-ghost">Ergebnisse exportieren (.enc)</button>
+          <button id="teacherBtn" class="btn-ghost">🔒 Lehrkraft</button>
+          <span id="teacherStatus" class="badge">gesperrt</span>
+          <button id="resetProgress" class="btn-danger">Fortschritt löschen</button>
+        </div>
+      </div>
+      <div id="banner" class="banner"></div>
+      <div id="diag" class="small"></div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="grid">
+      <aside class="card">
+        <div class="small">Fälle in dieser Woche</div>
+        <div id="caseList" class="grid-1"></div>
+        <div id="explanationBox">
+          <div class="title">Warum richtig?</div>
+          <div id="explanationText"></div>
+        </div>
+      </aside>
+      <section class="card">
+        <div id="caseView">
+          <div class="small">Starte mit: <b>JSON hochladen</b> und anschließend eine <b>Woche</b> wählen.</div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Overlay: Name/Klasse -->
+  <div class="overlay hidden" id="overlay">
+    <div class="modal">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div>
+          <h2>Bitte Name und Klasse eintragen</h2>
+          <p>Die Angaben werden lokal verschlüsselt gespeichert und im Kopfbereich angezeigt.</p>
+        </div>
+        <span class="badge">Schülermodus</span>
+      </div>
+      <form id="profileForm">
+        <label for="nameInput">Name</label>
+        <input id="nameInput" type="text" placeholder="z. B. Max Mustermann" required />
+        <label for="classInput">Klasse</label>
+        <input id="classInput" type="text" placeholder="z. B. N19-FR02" required />
+        <div class="actions">
+          <button type="button" class="btn-ghost" id="cancelOverlay">Abbrechen</button>
+          <button type="submit" class="btn-success">Speichern</button>
+        </div>
+        <p class="small">Hinweis: Nach der Ersteinrichtung ist <span class="kbd">Profil bearbeiten</span> nur im <b>Lehrkraft-Modus</b> möglich.</p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Bildviewer Overlay -->
+  <div class="overlay hidden" id="imgOverlay" aria-hidden="true">
+    <div id="imgViewer">
+      <button class="btn-ghost closeBtn" id="imgClose" title="Schließen">✕</button>
+      <div class="imgTopBar"><span class="pill" id="zoomInfo">100 %</span></div>
+      <div id="imgCanvas"><img id="zoomImg" alt="EKG"></div>
+      <div class="imgControls">
+        <button class="btn-ghost" id="zoomOut" title="Verkleinern">−</button>
+        <button class="btn-ghost" id="zoomReset" title="Zurücksetzen">100%</button>
+        <button class="btn-ghost" id="zoomIn" title="Vergrößern">+</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ===== Scroll-Lock Helpers =====
+let __overlayLocks = 0;
+function lockScroll(){
+  __overlayLocks++;
+  if(__overlayLocks === 1){
+    const sbw = window.innerWidth - document.documentElement.clientWidth;
+    document.documentElement.style.setProperty('--sbw', sbw + 'px');
+    document.body.classList.add('scroll-lock');
+  }
+}
+function unlockScroll(){
+  if(__overlayLocks > 0) __overlayLocks--;
+  if(__overlayLocks === 0){
+    document.body.classList.remove('scroll-lock');
+    document.documentElement.style.removeProperty('--sbw');
+  }
+}
+
+/* ========= Profil: lokale Verschlüsselung (AES-GCM) ========= */
+const PASS_PHRASE = "ekg-app-local-protect-v1";
+const SALT_STR = "ekg-student-salt-2025";
+const enc = new TextEncoder(); const dec = new TextDecoder();
+function strToBytes(str){ return enc.encode(str); }
+function bytesToB64(bytes){ let bin=""; bytes.forEach(b=>bin+=String.fromCharCode(b)); return btoa(bin); }
+function b64ToBytes(b64){ const bin=atob(b64); const out=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i); return out; }
+async function getKey(){
+  const keyMaterial = await crypto.subtle.importKey("raw", strToBytes(PASS_PHRASE), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name:"PBKDF2", salt:strToBytes(SALT_STR), iterations:120000, hash:"SHA-256" },
+    keyMaterial, { name:"AES-GCM", length:256 }, false, ["encrypt","decrypt"]);
+}
+async function encryptString(plainText){
+  const key = await getKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipherBuf = await crypto.subtle.encrypt({ name:"AES-GCM", iv }, key, strToBytes(plainText));
+  const data = new Uint8Array(iv.length + cipherBuf.byteLength);
+  data.set(iv,0); data.set(new Uint8Array(cipherBuf), iv.length);
+  return bytesToB64(data);
+}
+async function decryptString(payloadB64){
+  const data = b64ToBytes(payloadB64); const iv=data.slice(0,12); const cipher=data.slice(12);
+  const key = await getKey();
+  const plainBuf = await crypto.subtle.decrypt({ name:"AES-GCM", iv }, key, cipher);
+  return dec.decode(plainBuf);
+}
+const PROFILE_KEY = "ekg_student_profile_v1";
+async function saveProfile(name, klasse){
+  const nameEnc = await encryptString(name.trim());
+  const classEnc = await encryptString(klasse.trim());
+  localStorage.setItem(PROFILE_KEY, JSON.stringify({v:1,nameEnc,classEnc}));
+}
+async function loadProfile(){
+  const raw = localStorage.getItem(PROFILE_KEY);
+  if(!raw) return null;
+  try{
+    const obj = JSON.parse(raw);
+    const name = await decryptString(obj.nameEnc);
+    const klasse = await decryptString(obj.classEnc);
+    return {name, klasse};
+  }catch(e){ console.error("Profil konnte nicht entschlüsselt werden:", e); return null; }
+}
+function clearProfile(){ localStorage.removeItem(PROFILE_KEY); }
+
+/* ========= Elemente ========= */
+const els = {
+  file: document.getElementById('fileInput'),
+  week: document.getElementById('weekSelect'),
+  list: document.getElementById('caseList'),
+  view: document.getElementById('caseView'),
+  exportEnc: document.getElementById('exportEnc'),
+  teacherBtn: document.getElementById('teacherBtn'),
+  teacherStatus: document.getElementById('teacherStatus'),
+  reset: document.getElementById('resetProgress'),
+  banner: document.getElementById('banner'),
+  diag: document.getElementById('diag'),
+  nameBadge: document.getElementById('nameBadge'),
+  classBadge: document.getElementById('classBadge'),
+  btnProfile: document.getElementById('btnProfile'),
+  btnProfileReset: document.getElementById('btnProfileReset'),
+  explanationBox: document.getElementById('explanationBox'),
+  explanationText: document.getElementById('explanationText'),
+  imgOverlay: document.getElementById('imgOverlay'),
+  imgViewer: document.getElementById('imgViewer'),
+  imgCanvas: document.getElementById('imgCanvas'),
+  zoomImg: document.getElementById('zoomImg'),
+  zoomInfo: document.getElementById('zoomInfo'),
+  zoomIn: document.getElementById('zoomIn'),
+  zoomOut: document.getElementById('zoomOut'),
+  zoomReset: document.getElementById('zoomReset'),
+  imgClose: document.getElementById('imgClose'),
+};
+
+/* ========= Banner ========= */
+function showBanner(text, kind=''){ els.banner.textContent=text; els.banner.className='banner '+(kind||''); els.banner.style.display='block'; }
+
+/* ========= Teacher Mode ========= */
+const TEACHER_PIN = "4175";
+function isTeacher(){ return sessionStorage.getItem('teacherUnlocked') === '1'; }
+function lockTeacher(){ sessionStorage.removeItem('teacherUnlocked'); updateTeacherUI(); if(currentCaseId) openCase(currentCaseId); }
+function unlockTeacher(){ sessionStorage.setItem('teacherUnlocked','1'); updateTeacherUI(); if(currentCaseId) openCase(currentCaseId); }
+function updateTeacherUI(){ if(isTeacher()){ els.teacherBtn.textContent='🔓 Lehrkraft'; els.teacherStatus.textContent='entsperrt'; } else { els.teacherBtn.textContent='🔒 Lehrkraft'; els.teacherStatus.textContent='gesperrt'; } }
+
+/* ========= Week/Case/Progress ========= */
+let allCases = [];
+let currentWeek = null;
+let currentCaseId = null;
+
+const LS_KEY = 'ekgTrainerProgressV1';
+const progress = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+function saveProgress(){ localStorage.setItem(LS_KEY, JSON.stringify(progress)); }
+
+function setWeeksOptions(){
+  const weeksSet = new Set(allCases.map(c=>Number(c.week||1)));
+  const weeks = Array.from(weeksSet).sort((a,b)=>a-b);
+  const currentVal = els.week.value || "";
+  const options = ['<option value="">Woche wählen…</option>'] ;
+  for(const w of weeks){
+    const casesInW = allCases.filter(c=>Number(c.week)===Number(w));
+    const allDone = casesInW.length>0 && casesInW.every(c => (progress[c.id]?.checked) === true);
+    const label = allDone ? `Woche ${w} ✔️` : `Woche ${w}`;
+    options.push(`<option value="${w}">${label}</option>`);
+  }
+  els.week.innerHTML = options.join('');
+  if(currentVal) els.week.value = currentVal;
+  els.diag.innerHTML = `Geladen: <b>${allCases.length}</b> Fälle · Wochen: <b>${weeks.join(', ')||'–'}</b>`;
+}
+function adjustExplanationHeight(){ const box=document.getElementById('explanationBox'); if(box){ box.style.maxHeight='none'; } }
+window.addEventListener('resize', adjustExplanationHeight);
+
+function renderCaseList(){
+  const inWeek = allCases.filter(c=>Number(c.week)==Number(currentWeek));
+  if(inWeek.length===0){ els.list.innerHTML='<div class="small">Keine Fälle.</div>'; return; }
+  els.list.innerHTML = inWeek.map(c=>{
+    const p = progress[c.id]||{};
+    const status = p.checked ? `<span class="badge">abgegeben</span>` : `<span class="badge">offen</span>`;
+    return `<button data-id="${c.id}" class="btn-ghost" style="text-align:left;width:100%"><div class="small">Fall</div><div>${c.title}</div><div class="small">${status}</div></button>`;
+  }).join('');
+  [...els.list.querySelectorAll('button')].forEach(b=>b.addEventListener('click',()=>openCase(b.dataset.id)));
+  adjustExplanationHeight();
+}
+
+function buildImagesHTML(c){
+  // Unterstützt neues Feld "images" (Array) und altes Feld "image" (String)
+  if(Array.isArray(c.images) && c.images.length){
+    return c.images.map(src=>`<img src="${src}" alt="EKG">`).join('');
+  }
+  if(c.image){
+    return `<img src="${c.image}" alt="EKG">`;
+  }
+  return '<span class="muted">(Kein Bild angegeben)</span>';
+}
+
+function openCase(id){
+  currentCaseId = id;
+  const c = allCases.find(x=>x.id==id);
+  if(!c){ showBanner('Interner Fehler: Fall nicht gefunden','error'); return; }
+  const p = progress[id]||{ answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null };
+  const isLocked = !!p.locked;
+
+  const fieldsHtml = (c.fields||[]).map((f)=>{
+    const pObj = progress[id]||{ answers:{} };
+    if(f.fixed){
+      const val = f.fixedValue ?? '';
+      pObj.answers = pObj.answers || {}; pObj.answers[f.key] = val; progress[id] = pObj; saveProgress();
+      return `<div><div class="small">${f.label}</div><div style="background:#0b1f41;border:1px solid var(--line);border-radius:12px;padding:10px;color:#cdd7eb">${val}</div></div>`;
+    }
+    const val = (pObj.answers && pObj.answers[f.key]) || '';
+    const dis = isLocked ? 'disabled' : '';
+    return `<div><div class="small">${f.label}</div><textarea ${dis} data-key="${f.key}" placeholder="${f.placeholder||''}">${val}</textarea></div>`;
+  }).join('');
+
+  const readyForMC = (c.fields||[]).filter(f=>!f.fixed).every(f=> (p.answers?.[f.key]||'').trim().length>0 );
+  const options = Array.isArray(c.options) ? c.options : [];
+  const optionsHtml = options.map((opt,idx)=>{
+    const letter = String.fromCharCode(65+idx);
+    const checked = p.choice===letter ? 'checked' : '';
+    const dis = isLocked ? 'disabled' : '';
+    return `<label><input type="radio" name="mc" value="${letter}" ${checked} ${dis}> ${letter}) ${opt}</label>`;
+  }).join('');
+
+  const correctIndex = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.indexOf(c.correct||'A');
+  const correctText = (options[correctIndex]||'');
+
+  els.view.innerHTML = `
+    <div class="row" style="align-items:flex-start">
+      <div>
+        <div style="font-size:20px;font-weight:800">${c.title||''}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="badge">Versuche: <b id="attemptCount">${p.attempts||0}</b></span>
+        ${ isLocked ? `<button id=\"restartCase\" class=\"btn-success\">Neu starten</button>` : '' }
+      </div>
+    </div>
+    <div class="hr"></div>
+    <div class="grid" style="grid-template-columns:1fr 1fr; gap:16px">
+      <div>
+        <div class="small">Einleitung</div>
+        <div class="introText">${c.intro||''}</div>
+        <div class="spacer"></div>
+        <div class="imgbox">${buildImagesHTML(c)}</div>
+      </div>
+      <div>
+        <div class="small">Freitext-Interpretation</div>
+        ${fieldsHtml}
+        <div class="mc ${readyForMC?'show':''}" id="mc">
+          <div class="small">Zusammenfassende Interpretation (Option wählen)</div>
+          ${optionsHtml}
+          <div class="spacer"></div>
+          <button class="btn-accent" id="checkBtn" ${isLocked?'disabled':''}>Abgeben & prüfen</button>
+          <button id="clearChoice" class="btn-ghost" ${isLocked?'disabled':''}>Auswahl löschen</button>
+          <div id="resultBox" class="small" style="margin-top:8px"></div>
+          ${ (p.checked && isTeacher()) ? `
+            <div class="spacer"></div>
+            <div class="small">
+              <span class="muted">Lösung:</span> <b>${c.correct||'?'}</b> – ${correctText}<br>
+              <span class="muted">${c.solution||''}</span>
+            </div>` : '' }
+        </div>
+      </div>
+    </div>
+  `;
+
+  // === Bild-Click: alle Bilder anklickbar machen ===
+  const imgEls = els.view.querySelectorAll('.imgbox img');
+  imgEls.forEach(img => img.addEventListener('click', ()=> openImgViewer(img.src)));
+
+  const resultBox = document.getElementById('resultBox');
+  const showExplain = (ok, text) => {
+    if(ok && text && String(text).trim().length>0){
+      els.explanationText.textContent = text;
+      els.explanationBox.style.display = 'block';
+    } else {
+      els.explanationBox.style.display = 'none';
+      els.explanationText.textContent = '';
+    }
+  };
+
+  if(p.checked){
+    resultBox.innerHTML = p.lastOk ? '<span class="ok">✔️ Richtig!</span>' : '<span class="err">✖️ Falsch.</span>';
+    showExplain(p.lastOk, c.solution||'');
+  } else {
+    resultBox.innerHTML = '';
+    showExplain(false, '');
+  }
+
+  if(!isLocked){
+    els.view.querySelectorAll('textarea').forEach(t=>{
+      t.addEventListener('input',()=>{
+        const key = t.dataset.key;
+        progress[id] = progress[id] || {answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null};
+        progress[id].answers[key] = t.value;
+        saveProgress();
+        const ready = (c.fields||[]).filter(f=>!f.fixed).every(f=> (progress[id].answers[f.key]||'').trim().length>0 );
+        const mcEl = document.getElementById('mc');
+        if(mcEl){ mcEl.classList.toggle('show', ready); }
+      });
+    });
+  }
+
+  const mcEl = document.getElementById('mc');
+  if(mcEl){
+    if(!isLocked){
+      mcEl.querySelectorAll('input[name="mc"]').forEach(r=>{
+        r.addEventListener('change',()=>{
+          progress[id] = progress[id] || {answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null};
+          progress[id].choice = r.value; saveProgress();
+        });
+      });
+      const clearBtn = mcEl.querySelector('#clearChoice');
+      if(clearBtn){ clearBtn.addEventListener('click',()=>{ delete progress[id]?.choice; saveProgress(); openCase(id); }); }
+      const checkBtn = mcEl.querySelector('#checkBtn');
+      if(checkBtn){ checkBtn.addEventListener('click',()=>{
+        const choice = progress[id]?.choice;
+        const rb = document.getElementById('resultBox');
+        if(!choice){ rb.innerHTML = '<span class="err">Bitte zuerst eine Option wählen.</span>'; return; }
+        const ok = choice === (c.correct||'A');
+        progress[id].attempts = (progress[id].attempts||0) + 1;
+        progress[id].checked = true;
+        progress[id].locked = true;
+        progress[id].lastOk = ok;
+        saveProgress();
+        renderCaseList();
+        setWeeksOptions();
+        openCase(id);
+      });}
+    }
+  }
+
+  const restartBtn = document.getElementById('restartCase');
+  if(restartBtn){
+    restartBtn.addEventListener('click', ()=>{
+      if(confirm('Diesen Fall wirklich neu starten? Alle Eingaben werden gelöscht.')){
+        const attempts = (progress[id]?.attempts)||0;
+        progress[id] = { answers:{}, choice:null, checked:false, locked:false, attempts, lastOk:null };
+        saveProgress();
+        renderCaseList();
+        setWeeksOptions();
+        openCase(id);
+        showBanner('Fall zurückgesetzt. Du kannst neu beginnen.');
+      }
+    });
+  }
+}
+adjustExplanationHeight();
+
+function selectWeek(w){
+  currentWeek = w;
+  renderCaseList();
+  const first = allCases.find(c=>Number(c.week)==Number(w));
+  if(first) openCase(first.id); else els.view.innerHTML='<div class="small">Keine Fälle für diese Woche.</div>';
+}
+
+function defaultFields(){
+  return [
+    {key:'elektromechanik', label:'Elektrische und mechanische Aktivität vorhanden?', fixed:true, fixedValue:'Ja'},
+    {key:'ventr_frequenz', label:'Ventrikuläre Frequenz (∕min)', placeholder:'z. B. 78∕min'},
+    {key:'qrs_rhythmik', label:'QRS-Komplexe: rhythmisch oder arrhythmisch?', placeholder:'rhythmisch/arrhythmisch + Begründung'},
+    {key:'qrs_breite', label:'QRS-Komplexe: schmal oder breit?', placeholder:'schmal/breit + Dauer in s (falls bekannt)'},
+    {key:'vorhofaktivitaet', label:'Vorhofaktivität vorhanden?', placeholder:'ja/nein/unklar; P-Wellen sichtbar?'},
+    {key:'av_kopplung', label:'Kopplung zwischen Vorhof und Kammer?', placeholder:'ja/nein/variabel; kurz begründen'},
+    {key:'st_strecke', label:'ST-Strecke: Senkung oder Hebung?', placeholder:'Ort, Ausmaß (in mm), Morphologie'}
+  ];
+}
+
+function loadCases(json){
+  try{
+    if(!Array.isArray(json)){ showBanner('JSON muss ein Array sein.','error'); return; }
+    const mapped = json.map((c,i)=>({
+      id: c.id ?? (`case_${Date.now()}_${i}`),
+      week: Number(c.week ?? 1),
+      title: c.title ?? `EKG Fall ${i+1}`,
+      intro: c.intro ?? '',
+      // NEU: Mehrbild-Unterstützung (images-Array) + Fallback auf image-String
+      images: Array.isArray(c.images) ? c.images : (c.image ? [c.image] : []),
+      image: c.image ?? '',
+      fields: (c.fields && c.fields.length)? c.fields : defaultFields(),
+      options: Array.isArray(c.options)? c.options : [],
+      correct: c.correct ?? 'A',
+      solution: c.solution ?? ''
+    }));
+    allCases = mapped;
+    setWeeksOptions();
+    els.week.value='';
+    els.list.innerHTML='';
+    els.view.innerHTML='<div class="small">Woche auswählen, um zu starten.</div>';
+    els.explanationBox.style.display = 'none';
+    els.explanationText.textContent = '';
+  }catch(e){ showBanner('Fehler beim Laden der Fälle.','error'); }
+}
+
+/* ======= Export (.enc) – ohne Lösungstext & ohne "Abgegeben" ======= */
+function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m])); }
+function buildExportHTML(prof){
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('de-DE');
+  const timeStr = now.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+  let html = `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>EKG Export – ${escapeHtml(prof?.name||'')}</title>
+  <style>body{font-family:Arial,sans-serif;margin:20px}h1{font-size:20px}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #999;padding:6px 10px;text-align:left}th{background:#eee}.ok{color:green;font-weight:bold}.err{color:red;font-weight:bold}</style>
+  </head><body>`;
+  html += `<h1>EKG-Auswertung</h1><p><strong>Name:</strong> ${escapeHtml(prof?.name||'')}<br><strong>Klasse:</strong> ${escapeHtml(prof?.klasse||'')}<br><strong>Exportiert am:</strong> ${dateStr}, ${timeStr}</p>`;
+  html += `<table><tr><th>Fall-ID</th><th>Woche</th><th>Titel</th><th>Frequenz</th><th>Rhythmik</th><th>QRS-Breite</th><th>Vorhofaktivität</th><th>AV-Kopplung</th><th>ST-Strecke</th><th>Schüler-MC</th><th>Richtig/Falsch</th><th>Korrekte Lösung</th><th>Versuche</th></tr>`;
+  allCases.forEach(c=>{
+    const p = progress[c.id]||{};
+    if(!p.checked) return;
+    const ans = p.answers||{};
+    const choice = p.choice||'';
+    const ok = choice === (c.correct||'A');
+    html += `<tr><td>${escapeHtml(c.id)}</td><td>${escapeHtml(c.week)}</td><td>${escapeHtml(c.title)}</td>
+    <td>${escapeHtml(ans.ventr_frequenz)}</td><td>${escapeHtml(ans.qrs_rhythmik)}</td><td>${escapeHtml(ans.qrs_breite)}</td><td>${escapeHtml(ans.vorhofaktivitaet)}</td><td>${escapeHtml(ans.av_kopplung)}</td><td>${escapeHtml(ans.st_strecke)}</td>
+    <td>${escapeHtml(choice)}</td><td class="${ok?'ok':'err'}">${ok?'Richtig':'Falsch'}</td><td>${escapeHtml(c.correct)}</td><td>${escapeHtml(p.attempts||1)}</td></tr>`;
+  });
+  html += `</table></body></html>`;
+  return html;
+}
+
+async function exportEncryptedHTML(){
+  const prof = await loadProfile();
+  const plainHtml = buildExportHTML(prof);
+  const pass = TEACHER_PIN;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const keyMat = await crypto.subtle.importKey('raw', strToBytes(pass), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:120000, hash:'SHA-256'}, keyMat, {name:'AES-GCM', length:256}, false, ['encrypt']);
+  const cipherBuf = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, strToBytes(plainHtml));
+  const payload = { ver:'1', alg:'AES-GCM', kdf:'PBKDF2', iter:120000, salt:bytesToB64(salt), iv:bytesToB64(iv), ct:bytesToB64(new Uint8Array(cipherBuf)) };
+  const blob = new Blob([JSON.stringify(payload)], {type:'application/octet-stream'});
+  const name = (prof?.name||'Schueler').replace(/\s+/g,'');
+  const iso = new Date().toISOString().slice(0,16).replace(/:/g,'-');
+  const fileName = `EKG_${name}_${iso}.enc`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=fileName; a.click(); URL.revokeObjectURL(url);
+  showBanner('Export erstellt. Datei wurde verschlüsselt und heruntergeladen.');
+}
+
+/* ========= Event Handler ========= */
+els.file.addEventListener('change',(e)=>{
+  const file=e.target.files?.[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=()=>{ try{ const json=JSON.parse(reader.result); loadCases(json); showBanner('Fälle geladen.'); }catch(err){ showBanner('Fehlerhafte JSON-Datei.','error'); } };
+  reader.readAsText(file);
+});
+els.week.addEventListener('change',()=>{ if(els.week.value) selectWeek(Number(els.week.value)); adjustExplanationHeight(); });
+els.teacherBtn.addEventListener('click',()=>{
+  if(isTeacher()){ lockTeacher(); return; }
+  const pin=prompt('PIN für Lehrkraft-Modus eingeben:');
+  if(pin===null) return;
+  if(pin===TEACHER_PIN) unlockTeacher(); else showBanner('Falscher PIN.','error');
+});
+els.exportEnc.addEventListener('click', exportEncryptedHTML);
+els.reset.addEventListener('click',()=>{
+  if(confirm('Fortschritt wirklich löschen?')){
+    for(const k in progress) delete progress[k];
+    saveProgress();
+    if(currentCaseId) openCase(currentCaseId);
+    renderCaseList();
+    setWeeksOptions();
+    els.explanationBox.style.display = 'none';
+    els.explanationText.textContent = '';
+    showBanner('Fortschritt gelöscht.');
+  }
+});
+
+/* Profil bearbeiten/löschen – Lehrkraft-Modus */
+const overlayEl = document.getElementById('overlay');
+const profileFormEl = document.getElementById('profileForm');
+const nameInputEl = document.getElementById('nameInput');
+const classInputEl = document.getElementById('classInput');
+const cancelOverlayEl = document.getElementById('cancelOverlay');
+
+els.btnProfile.addEventListener('click', async ()=>{
+  if(!isTeacher()){ showBanner('Profil bearbeiten ist nur im Lehrkraft-Modus möglich.','warn'); return; }
+  const prof = await loadProfile();
+  nameInputEl.value = prof?.name || '';
+  classInputEl.value = prof?.klasse || '';
+  overlayEl.classList.remove('hidden');
+  lockScroll();
+});
+els.btnProfileReset.addEventListener('click', async ()=>{
+  if(!isTeacher()){ showBanner('Profil zurücksetzen ist nur im Lehrkraft-Modus möglich.','warn'); return; }
+  if(confirm('Profil wirklich zurücksetzen?')){
+    clearProfile();
+    renderProfileUI(null);
+    overlayEl.classList.remove('hidden');
+    lockScroll();
+    showBanner('Profil gelöscht. Bitte neu eintragen.');
+  }
+});
+
+/* ========= Init ========= */
+updateTeacherUI();
+(async function enforceFirstRun(){
+  const prof = await loadProfile();
+  renderProfileUI(prof);
+  if(!prof){ overlayEl.classList.remove('hidden'); lockScroll(); showBanner('Bitte zuerst Name & Klasse eintragen.', 'warn'); }
+})();
+els.diag.innerHTML = 'Bereit. Lade eine JSON-Datei, um zu starten.';
+
+// Overlay events
+profileFormEl.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const name = nameInputEl.value.trim();
+  const klasse = classInputEl.value.trim();
+  if(!name || !klasse){ alert('Bitte Name und Klasse eintragen.'); return; }
+  await saveProfile(name, klasse);
+  renderProfileUI({name, klasse});
+  overlayEl.classList.add('hidden');
+  unlockScroll();
+  showBanner('Profil gespeichert.');
+});
+cancelOverlayEl.addEventListener('click', async ()=>{
+  const prof = await loadProfile();
+  if(prof){ overlayEl.classList.add('hidden'); unlockScroll(); }
+});
+
+/* ========= UI Helpers ========= */
+function renderProfileUI(prof){
+  if(!prof){
+    els.nameBadge.textContent = 'Name: –';
+    els.classBadge.textContent = 'Klasse: –';
+    return;
+  }
+  els.nameBadge.textContent = `Name: ${prof.name}`;
+  els.classBadge.textContent = `Klasse: ${prof.klasse}`;
+}
+
+/* ========= Bildviewer Logic ========= */
+let z = 1, minZ = 0.5, maxZ = 8, posX = 0, posY = 0, isDrag = false, startX = 0, startY = 0;
+function updateZoomDisplay(){ els.zoomInfo.textContent = Math.round(z*100) + ' %'; }
+function openImgViewer(src){ els.zoomImg.src = src; els.imgOverlay.classList.remove('hidden'); lockScroll(); z=1; posX=0; posY=0; updateTransform(); updateZoomDisplay(); }
+function closeImgViewer(){ els.imgOverlay.classList.add('hidden'); unlockScroll(); }
+function updateTransform(){ els.zoomImg.style.transform = `translate(calc(-50% + ${posX}px), calc(-50% + ${posY}px)) scale(${z})`; }
+els.imgOverlay.addEventListener('wheel', (e)=>{ if(e.target.closest('#imgViewer')){ e.preventDefault(); const delta=Math.sign(e.deltaY); const step=0.12; z=Math.min(maxZ, Math.max(minZ, z * (delta>0? (1-step):(1+step)))); updateTransform(); updateZoomDisplay(); } }, {passive:false});
+els.imgCanvas.addEventListener('mousedown', (e)=>{ isDrag = true; startX = e.clientX - posX; startY = e.clientY - posY; els.imgCanvas.classList.add('grabbing'); });
+window.addEventListener('mouseup', ()=>{ isDrag = false; els.imgCanvas.classList.remove('grabbing'); });
+window.addEventListener('mousemove', (e)=>{ if(!isDrag) return; posX = e.clientX - startX; posY = e.clientY - startY; updateTransform(); });
+els.imgCanvas.addEventListener('touchstart', (e)=>{ if(e.touches.length===1){ const t=e.touches[0]; isDrag=true; startX=t.clientX - posX; startY=t.clientY - posY; } });
+els.imgCanvas.addEventListener('touchmove', (e)=>{ if(isDrag && e.touches.length===1){ const t=e.touches[0]; posX=t.clientX - startX; posY=t.clientY - startY; updateTransform(); } });
+els.imgCanvas.addEventListener('touchend', ()=>{ isDrag=false; });
+els.zoomIn.addEventListener('click', ()=>{ z=Math.min(maxZ, z*1.2); updateTransform(); updateZoomDisplay(); });
+els.zoomOut.addEventListener('click', ()=>{ z=Math.max(minZ, z/1.2); updateTransform(); updateZoomDisplay(); });
+els.zoomReset.addEventListener('click', ()=>{ z=1; posX=0; posY=0; updateTransform(); updateZoomDisplay(); });
+els.imgClose.addEventListener('click', closeImgViewer);
+els.imgOverlay.addEventListener('click', (e)=>{ if(e.target===els.imgOverlay) closeImgViewer(); });
+</script>
+</body>
+</html>
