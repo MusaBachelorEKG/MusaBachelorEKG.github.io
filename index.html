@@ -123,24 +123,16 @@
     <div class="wrap">
       <div class="row">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <div class="title">EKG – Schüler Trainer</div>
-          <span class="badge" id="nameBadge">Name: –</span>
-          <span class="badge" id="classBadge">Klasse: –</span>
-        </div>
-        <div class="toolbar">
-          <button class="btn-ghost" id="btnProfile">Profil bearbeiten</button>
-          <button class="btn-ghost" id="btnProfileReset">Profil zurücksetzen</button>
+          <div class="title">EKG-Analysen</div>
+          <span class="badge" id="statusBadge">Screening: offen</span>
         </div>
       </div>
       <div class="ecg-bar" aria-hidden="true"></div>
       <div class="spacer"></div>
       <div class="row card" style="gap:10px">
         <div class="toolbar" style="flex:1 1 auto">
-          <input type="file" id="fileInput" accept="application/json" />
-          <select id="weekSelect"><option value="">Woche wählen…</option></select>
+          <button id="showCases" class="btn-accent">5 EKG-Fälle anzeigen</button>
           <button id="exportEnc" class="btn-ghost">Ergebnisse exportieren (.enc)</button>
-          <button id="teacherBtn" class="btn-ghost">🔒 Lehrkraft</button>
-          <span id="teacherStatus" class="badge">gesperrt</span>
           <button id="resetProgress" class="btn-danger">Fortschritt löschen</button>
         </div>
       </div>
@@ -152,7 +144,7 @@
   <main class="wrap">
     <div class="grid">
       <aside class="card">
-        <div class="small">Fälle in dieser Woche</div>
+        <div class="small">EKG-Fälle</div>
         <div id="caseList" class="grid-1"></div>
         <div id="explanationBox">
           <div class="title">Warum richtig?</div>
@@ -161,33 +153,40 @@
       </aside>
       <section class="card">
         <div id="caseView">
-          <div class="small">Starte mit: <b>JSON hochladen</b> und anschließend eine <b>Woche</b> wählen.</div>
+          <div class="small">Fälle sind bereits geladen. Wähle einen <b>Fall</b>, um zu starten.</div>
         </div>
       </section>
     </div>
   </main>
 
-  <!-- Overlay: Name/Klasse -->
+  <!-- Integrierte Falldaten -->
+  <script src="cases-data.js"></script>
+
+  <!-- Overlay: Screening-Fragen -->
   <div class="overlay hidden" id="overlay">
     <div class="modal">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
         <div>
-          <h2>Bitte Name und Klasse eintragen</h2>
-          <p>Die Angaben werden lokal verschlüsselt gespeichert und im Kopfbereich angezeigt.</p>
+          <h2>Screening vor dem Test</h2>
+          <p>Bitte beantworte die folgenden Fragen. Nur passende Teilnehmende können fortfahren.</p>
         </div>
-        <span class="badge">Schülermodus</span>
       </div>
-      <form id="profileForm">
-        <label for="nameInput">Name</label>
-        <input id="nameInput" type="text" placeholder="z. B. Max Mustermann" required />
-        <label for="classInput">Klasse</label>
-        <input id="classInput" type="text" placeholder="z. B. N19-FR02" required />
-        <div class="actions">
-          <button type="button" class="btn-ghost" id="cancelOverlay">Abbrechen</button>
-          <button type="submit" class="btn-success">Speichern</button>
+      <div id="screeningBox">
+        <div class="small" id="progressText">Frage 1 von 3</div>
+        <div style="font-size:16px;font-weight:700" id="questionText"></div>
+        <div class="actions" style="justify-content:flex-start">
+          <button type="button" class="btn-success" id="answerYes">Ja</button>
+          <button type="button" class="btn-danger" id="answerNo">Nein</button>
         </div>
-        <p class="small">Hinweis: Nach der Ersteinrichtung ist <span class="kbd">Profil bearbeiten</span> nur im <b>Lehrkraft-Modus</b> möglich.</p>
-      </form>
+        <p class="small">Wenn eine Antwort nicht passt, wird der Test automatisch beendet.</p>
+      </div>
+      <div id="screeningResult" style="display:none;">
+        <div class="badge" style="background:rgba(255,107,107,.12);color:var(--danger);border-color:var(--danger)">Keine Teilnahme möglich</div>
+        <p id="resultText" class="small" style="color:var(--ink);margin-top:10px"></p>
+        <div class="actions" style="justify-content:flex-end;margin-top:12px">
+          <button type="button" class="btn-ghost" id="cancelOverlay">Schließen</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -250,40 +249,36 @@ async function decryptString(payloadB64){
   const plainBuf = await crypto.subtle.decrypt({ name:"AES-GCM", iv }, key, cipher);
   return dec.decode(plainBuf);
 }
-const PROFILE_KEY = "ekg_student_profile_v1";
-async function saveProfile(name, klasse){
-  const nameEnc = await encryptString(name.trim());
-  const classEnc = await encryptString(klasse.trim());
-  localStorage.setItem(PROFILE_KEY, JSON.stringify({v:1,nameEnc,classEnc}));
+const PROFILE_KEY = "ekg_student_profile_v2";
+async function saveProfile(status, answers, reason=''){
+  const answersEnc = await encryptString(JSON.stringify(answers||{}));
+  const statusEnc = await encryptString(status);
+  const reasonEnc = await encryptString(reason);
+  localStorage.setItem(PROFILE_KEY, JSON.stringify({v:2,statusEnc,answersEnc,reasonEnc}));
 }
 async function loadProfile(){
   const raw = localStorage.getItem(PROFILE_KEY);
   if(!raw) return null;
   try{
     const obj = JSON.parse(raw);
-    const name = await decryptString(obj.nameEnc);
-    const klasse = await decryptString(obj.classEnc);
-    return {name, klasse};
+    const status = await decryptString(obj.statusEnc);
+    const answers = JSON.parse(await decryptString(obj.answersEnc) || '{}');
+    const reason = await decryptString(obj.reasonEnc);
+    return {status, answers, reason};
   }catch(e){ console.error("Profil konnte nicht entschlüsselt werden:", e); return null; }
 }
 function clearProfile(){ localStorage.removeItem(PROFILE_KEY); }
 
 /* ========= Elemente ========= */
 const els = {
-  file: document.getElementById('fileInput'),
-  week: document.getElementById('weekSelect'),
   list: document.getElementById('caseList'),
   view: document.getElementById('caseView'),
   exportEnc: document.getElementById('exportEnc'),
-  teacherBtn: document.getElementById('teacherBtn'),
-  teacherStatus: document.getElementById('teacherStatus'),
   reset: document.getElementById('resetProgress'),
+  showCases: document.getElementById('showCases'),
   banner: document.getElementById('banner'),
   diag: document.getElementById('diag'),
-  nameBadge: document.getElementById('nameBadge'),
-  classBadge: document.getElementById('classBadge'),
-  btnProfile: document.getElementById('btnProfile'),
-  btnProfileReset: document.getElementById('btnProfileReset'),
+  statusBadge: document.getElementById('statusBadge'),
   explanationBox: document.getElementById('explanationBox'),
   explanationText: document.getElementById('explanationText'),
   imgOverlay: document.getElementById('imgOverlay'),
@@ -300,44 +295,24 @@ const els = {
 /* ========= Banner ========= */
 function showBanner(text, kind=''){ els.banner.textContent=text; els.banner.className='banner '+(kind||''); els.banner.style.display='block'; }
 
-/* ========= Teacher Mode ========= */
-const TEACHER_PIN = "4175";
-function isTeacher(){ return sessionStorage.getItem('teacherUnlocked') === '1'; }
-function lockTeacher(){ sessionStorage.removeItem('teacherUnlocked'); updateTeacherUI(); if(currentCaseId) openCase(currentCaseId); }
-function unlockTeacher(){ sessionStorage.setItem('teacherUnlocked','1'); updateTeacherUI(); if(currentCaseId) openCase(currentCaseId); }
-function updateTeacherUI(){ if(isTeacher()){ els.teacherBtn.textContent='🔓 Lehrkraft'; els.teacherStatus.textContent='entsperrt'; } else { els.teacherBtn.textContent='🔒 Lehrkraft'; els.teacherStatus.textContent='gesperrt'; } }
-
-/* ========= Week/Case/Progress ========= */
+/* ========= Fälle/Progress ========= */
 let allCases = [];
-let currentWeek = null;
 let currentCaseId = null;
 
 const LS_KEY = 'ekgTrainerProgressV1';
 const progress = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
 function saveProgress(){ localStorage.setItem(LS_KEY, JSON.stringify(progress)); }
 
-function setWeeksOptions(){
-  const weeksSet = new Set(allCases.map(c=>Number(c.week||1)));
-  const weeks = Array.from(weeksSet).sort((a,b)=>a-b);
-  const currentVal = els.week.value || "";
-  const options = ['<option value="">Woche wählen…</option>'] ;
-  for(const w of weeks){
-    const casesInW = allCases.filter(c=>Number(c.week)===Number(w));
-    const allDone = casesInW.length>0 && casesInW.every(c => (progress[c.id]?.checked) === true);
-    const label = allDone ? `Woche ${w} ✔️` : `Woche ${w}`;
-    options.push(`<option value="${w}">${label}</option>`);
-  }
-  els.week.innerHTML = options.join('');
-  if(currentVal) els.week.value = currentVal;
-  els.diag.innerHTML = `Geladen: <b>${allCases.length}</b> Fälle · Wochen: <b>${weeks.join(', ')||'–'}</b>`;
+function updateStats(){
+  const finished = allCases.filter(c=>progress[c.id]?.checked).length;
+  els.diag.innerHTML = `Geladen: <b>${allCases.length}</b> Fälle · Abgegeben: <b>${finished}</b>`;
 }
 function adjustExplanationHeight(){ const box=document.getElementById('explanationBox'); if(box){ box.style.maxHeight='none'; } }
 window.addEventListener('resize', adjustExplanationHeight);
 
 function renderCaseList(){
-  const inWeek = allCases.filter(c=>Number(c.week)==Number(currentWeek));
-  if(inWeek.length===0){ els.list.innerHTML='<div class="small">Keine Fälle.</div>'; return; }
-  els.list.innerHTML = inWeek.map(c=>{
+  if(allCases.length===0){ els.list.innerHTML='<div class="small">Keine Fälle.</div>'; return; }
+  els.list.innerHTML = allCases.map(c=>{
     const p = progress[c.id]||{};
     const status = p.checked ? `<span class="badge">abgegeben</span>` : `<span class="badge">offen</span>`;
     return `<button data-id="${c.id}" class="btn-ghost" style="text-align:left;width:100%"><div class="small">Fall</div><div>${c.title}</div><div class="small">${status}</div></button>`;
@@ -416,7 +391,7 @@ function openCase(id){
           <button class="btn-accent" id="checkBtn" ${isLocked?'disabled':''}>Abgeben & prüfen</button>
           <button id="clearChoice" class="btn-ghost" ${isLocked?'disabled':''}>Auswahl löschen</button>
           <div id="resultBox" class="small" style="margin-top:8px"></div>
-          ${ (p.checked && isTeacher()) ? `
+          ${ p.checked ? `
             <div class="spacer"></div>
             <div class="small">
               <span class="muted">Lösung:</span> <b>${c.correct||'?'}</b> – ${correctText}<br>
@@ -487,7 +462,7 @@ function openCase(id){
         progress[id].lastOk = ok;
         saveProgress();
         renderCaseList();
-        setWeeksOptions();
+        updateStats();
         openCase(id);
       });}
     }
@@ -501,7 +476,7 @@ function openCase(id){
         progress[id] = { answers:{}, choice:null, checked:false, locked:false, attempts, lastOk:null };
         saveProgress();
         renderCaseList();
-        setWeeksOptions();
+        updateStats();
         openCase(id);
         showBanner('Fall zurückgesetzt. Du kannst neu beginnen.');
       }
@@ -509,13 +484,6 @@ function openCase(id){
   }
 }
 adjustExplanationHeight();
-
-function selectWeek(w){
-  currentWeek = w;
-  renderCaseList();
-  const first = allCases.find(c=>Number(c.week)==Number(w));
-  if(first) openCase(first.id); else els.view.innerHTML='<div class="small">Keine Fälle für diese Woche.</div>';
-}
 
 function defaultFields(){
   return [
@@ -534,7 +502,6 @@ function loadCases(json){
     if(!Array.isArray(json)){ showBanner('JSON muss ein Array sein.','error'); return; }
     const mapped = json.map((c,i)=>({
       id: c.id ?? (`case_${Date.now()}_${i}`),
-      week: Number(c.week ?? 1),
       title: c.title ?? `EKG Fall ${i+1}`,
       intro: c.intro ?? '',
       // NEU: Mehrbild-Unterstützung (images-Array) + Fallback auf image-String
@@ -546,10 +513,10 @@ function loadCases(json){
       solution: c.solution ?? ''
     }));
     allCases = mapped;
-    setWeeksOptions();
-    els.week.value='';
-    els.list.innerHTML='';
-    els.view.innerHTML='<div class="small">Woche auswählen, um zu starten.</div>';
+    renderCaseList();
+    updateStats();
+    const first = allCases[0];
+    if(first){ openCase(first.id); }
     els.explanationBox.style.display = 'none';
     els.explanationText.textContent = '';
   }catch(e){ showBanner('Fehler beim Laden der Fälle.','error'); }
@@ -565,14 +532,14 @@ function buildExportHTML(prof){
   <style>body{font-family:Arial,sans-serif;margin:20px}h1{font-size:20px}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #999;padding:6px 10px;text-align:left}th{background:#eee}.ok{color:green;font-weight:bold}.err{color:red;font-weight:bold}</style>
   </head><body>`;
   html += `<h1>EKG-Auswertung</h1><p><strong>Name:</strong> ${escapeHtml(prof?.name||'')}<br><strong>Klasse:</strong> ${escapeHtml(prof?.klasse||'')}<br><strong>Exportiert am:</strong> ${dateStr}, ${timeStr}</p>`;
-  html += `<table><tr><th>Fall-ID</th><th>Woche</th><th>Titel</th><th>Frequenz</th><th>Rhythmik</th><th>QRS-Breite</th><th>Vorhofaktivität</th><th>AV-Kopplung</th><th>ST-Strecke</th><th>Schüler-MC</th><th>Richtig/Falsch</th><th>Korrekte Lösung</th><th>Versuche</th></tr>`;
+  html += `<table><tr><th>Fall-ID</th><th>Titel</th><th>Frequenz</th><th>Rhythmik</th><th>QRS-Breite</th><th>Vorhofaktivität</th><th>AV-Kopplung</th><th>ST-Strecke</th><th>Schüler-MC</th><th>Richtig/Falsch</th><th>Korrekte Lösung</th><th>Versuche</th></tr>`;
   allCases.forEach(c=>{
     const p = progress[c.id]||{};
     if(!p.checked) return;
     const ans = p.answers||{};
     const choice = p.choice||'';
     const ok = choice === (c.correct||'A');
-    html += `<tr><td>${escapeHtml(c.id)}</td><td>${escapeHtml(c.week)}</td><td>${escapeHtml(c.title)}</td>
+    html += `<tr><td>${escapeHtml(c.id)}</td><td>${escapeHtml(c.title)}</td>
     <td>${escapeHtml(ans.ventr_frequenz)}</td><td>${escapeHtml(ans.qrs_rhythmik)}</td><td>${escapeHtml(ans.qrs_breite)}</td><td>${escapeHtml(ans.vorhofaktivitaet)}</td><td>${escapeHtml(ans.av_kopplung)}</td><td>${escapeHtml(ans.st_strecke)}</td>
     <td>${escapeHtml(choice)}</td><td class="${ok?'ok':'err'}">${ok?'Richtig':'Falsch'}</td><td>${escapeHtml(c.correct)}</td><td>${escapeHtml(p.attempts||1)}</td></tr>`;
   });
@@ -583,7 +550,7 @@ function buildExportHTML(prof){
 async function exportEncryptedHTML(){
   const prof = await loadProfile();
   const plainHtml = buildExportHTML(prof);
-  const pass = TEACHER_PIN;
+  const pass = "ekg-export-pass";
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const keyMat = await crypto.subtle.importKey('raw', strToBytes(pass), 'PBKDF2', false, ['deriveKey']);
@@ -600,18 +567,12 @@ async function exportEncryptedHTML(){
 }
 
 /* ========= Event Handler ========= */
-els.file.addEventListener('change',(e)=>{
-  const file=e.target.files?.[0]; if(!file) return;
-  const reader=new FileReader();
-  reader.onload=()=>{ try{ const json=JSON.parse(reader.result); loadCases(json); showBanner('Fälle geladen.'); }catch(err){ showBanner('Fehlerhafte JSON-Datei.','error'); } };
-  reader.readAsText(file);
-});
-els.week.addEventListener('change',()=>{ if(els.week.value) selectWeek(Number(els.week.value)); adjustExplanationHeight(); });
-els.teacherBtn.addEventListener('click',()=>{
-  if(isTeacher()){ lockTeacher(); return; }
-  const pin=prompt('PIN für Lehrkraft-Modus eingeben:');
-  if(pin===null) return;
-  if(pin===TEACHER_PIN) unlockTeacher(); else showBanner('Falscher PIN.','error');
+els.showCases.addEventListener('click',()=>{
+  renderCaseList();
+  updateStats();
+  if(currentCaseId){ openCase(currentCaseId); }
+  else if(allCases[0]){ openCase(allCases[0].id); }
+  document.getElementById('caseList').scrollIntoView({behavior:'smooth'});
 });
 els.exportEnc.addEventListener('click', exportEncryptedHTML);
 els.reset.addEventListener('click',()=>{
@@ -620,74 +581,114 @@ els.reset.addEventListener('click',()=>{
     saveProgress();
     if(currentCaseId) openCase(currentCaseId);
     renderCaseList();
-    setWeeksOptions();
+    updateStats();
     els.explanationBox.style.display = 'none';
     els.explanationText.textContent = '';
     showBanner('Fortschritt gelöscht.');
   }
 });
 
-/* Profil bearbeiten/löschen – Lehrkraft-Modus */
+/* Screening-Overlay */
 const overlayEl = document.getElementById('overlay');
-const profileFormEl = document.getElementById('profileForm');
-const nameInputEl = document.getElementById('nameInput');
-const classInputEl = document.getElementById('classInput');
+const progressTextEl = document.getElementById('progressText');
+const questionTextEl = document.getElementById('questionText');
+const answerYesEl = document.getElementById('answerYes');
+const answerNoEl = document.getElementById('answerNo');
+const screeningBoxEl = document.getElementById('screeningBox');
+const screeningResultEl = document.getElementById('screeningResult');
+const resultTextEl = document.getElementById('resultText');
 const cancelOverlayEl = document.getElementById('cancelOverlay');
 
-els.btnProfile.addEventListener('click', async ()=>{
-  if(!isTeacher()){ showBanner('Profil bearbeiten ist nur im Lehrkraft-Modus möglich.','warn'); return; }
-  const prof = await loadProfile();
-  nameInputEl.value = prof?.name || '';
-  classInputEl.value = prof?.klasse || '';
-  overlayEl.classList.remove('hidden');
+const questions = [
+  { id:'bw', text:'Notfallsanitäter in Baden-Württemberg?', exitOn:'no', exitReason:'Leider gehörst du nicht zu der Probandengruppe für diese Bachelor Frage.' },
+  { id:'jahr', text:'Bist du zu dem Zeitpunkt dieses Testes im 3. Ausbildungsjahr oder noch im 1. Berufsjahr?', exitOn:'no', exitReason:'Leider gehörst du nicht zu der Probandengruppe für diese Bachelor Frage.' },
+  { id:'weiterbildung', text:'Hast du schon zertifizierte externe Weiterbildungen genutzt außerhalb des Schulischen Curriculum?', exitOn:'yes', exitReason:'Leider gehörst du nicht zu der Probandengruppe für diese Bachelor Frage.' },
+];
+let qIndex = 0;
+let qAnswers = {};
+
+function showQuestion(idx){
+  const q = questions[idx];
+  progressTextEl.textContent = `Frage ${idx+1} von ${questions.length}`;
+  questionTextEl.textContent = q.text;
+  screeningBoxEl.style.display = 'block';
+  screeningResultEl.style.display = 'none';
+}
+
+function exitFlow(reason){
+  resultTextEl.textContent = reason;
+  screeningBoxEl.style.display = 'none';
+  screeningResultEl.style.display = 'block';
+  saveProfile('ineligible', qAnswers, reason);
+  renderProfileUI({status:'ineligible', reason});
   lockScroll();
-});
-els.btnProfileReset.addEventListener('click', async ()=>{
-  if(!isTeacher()){ showBanner('Profil zurücksetzen ist nur im Lehrkraft-Modus möglich.','warn'); return; }
-  if(confirm('Profil wirklich zurücksetzen?')){
-    clearProfile();
-    renderProfileUI(null);
-    overlayEl.classList.remove('hidden');
-    lockScroll();
-    showBanner('Profil gelöscht. Bitte neu eintragen.');
-  }
-});
+  overlayEl.classList.remove('hidden');
+  showBanner(reason, 'error');
+}
+
+function completeFlow(){
+  saveProfile('eligible', qAnswers, '');
+  renderProfileUI({status:'eligible'});
+  overlayEl.classList.add('hidden');
+  unlockScroll();
+  showBanner('Screening abgeschlossen. Viel Erfolg!');
+}
+
+function handleAnswer(isYes){
+  const q = questions[qIndex];
+  qAnswers[q.id] = isYes ? 'yes' : 'no';
+  const triggersExit = (q.exitOn === 'yes' && isYes) || (q.exitOn === 'no' && !isYes);
+  if(triggersExit){ exitFlow(q.exitReason); return; }
+  if(qIndex === questions.length-1){ completeFlow(); return; }
+  qIndex++; showQuestion(qIndex);
+}
+
+answerYesEl.addEventListener('click', ()=>handleAnswer(true));
+answerNoEl.addEventListener('click', ()=>handleAnswer(false));
 
 /* ========= Init ========= */
-updateTeacherUI();
 (async function enforceFirstRun(){
   const prof = await loadProfile();
   renderProfileUI(prof);
-  if(!prof){ overlayEl.classList.remove('hidden'); lockScroll(); showBanner('Bitte zuerst Name & Klasse eintragen.', 'warn'); }
+  qAnswers = prof?.answers || {};
+  qIndex = 0;
+  showQuestion(qIndex);
+  if(!prof || prof.status === 'ineligible'){
+    overlayEl.classList.remove('hidden');
+    lockScroll();
+    if(prof?.status === 'ineligible'){ resultTextEl.textContent = prof.reason || 'Keine Teilnahme möglich.'; screeningBoxEl.style.display='none'; screeningResultEl.style.display='block'; }
+    showBanner('Bitte zuerst das Screening durchführen.', 'warn');
+  }
 })();
-els.diag.innerHTML = 'Bereit. Lade eine JSON-Datei, um zu starten.';
+const embeddedCases = Array.isArray(window.EMBEDDED_CASES) ? window.EMBEDDED_CASES : [];
+if(embeddedCases.length){
+  loadCases(embeddedCases);
+  showBanner('Integrierte Fälle geladen.');
+} else {
+  els.diag.innerHTML = 'Keine eingebetteten Fälle gefunden.';
+}
 
-// Overlay events
-profileFormEl.addEventListener('submit', async (e)=>{
-  e.preventDefault();
-  const name = nameInputEl.value.trim();
-  const klasse = classInputEl.value.trim();
-  if(!name || !klasse){ alert('Bitte Name und Klasse eintragen.'); return; }
-  await saveProfile(name, klasse);
-  renderProfileUI({name, klasse});
-  overlayEl.classList.add('hidden');
-  unlockScroll();
-  showBanner('Profil gespeichert.');
-});
 cancelOverlayEl.addEventListener('click', async ()=>{
   const prof = await loadProfile();
-  if(prof){ overlayEl.classList.add('hidden'); unlockScroll(); }
+  if(prof && prof.status !== 'ineligible'){ overlayEl.classList.add('hidden'); unlockScroll(); }
 });
 
 /* ========= UI Helpers ========= */
 function renderProfileUI(prof){
   if(!prof){
-    els.nameBadge.textContent = 'Name: –';
-    els.classBadge.textContent = 'Klasse: –';
+    els.statusBadge.textContent = 'Screening: offen';
+    els.statusBadge.style.background = '#0b2146';
     return;
   }
-  els.nameBadge.textContent = `Name: ${prof.name}`;
-  els.classBadge.textContent = `Klasse: ${prof.klasse}`;
+  if(prof.status === 'eligible'){
+    els.statusBadge.textContent = 'Screening: freigegeben';
+    els.statusBadge.style.background = 'rgba(34,197,94,.18)';
+    els.statusBadge.style.color = 'var(--ok)';
+  } else {
+    els.statusBadge.textContent = 'Screening: blockiert';
+    els.statusBadge.style.background = 'rgba(255,107,107,.18)';
+    els.statusBadge.style.color = 'var(--danger)';
+  }
 }
 
 /* ========= Bildviewer Logic ========= */
