@@ -133,7 +133,6 @@
         <div class="toolbar" style="flex:1 1 auto">
           <button id="showCases" class="btn-accent">5 EKG-Fälle anzeigen</button>
           <button id="exportEnc" class="btn-ghost">Ergebnisse exportieren (.enc)</button>
-          <button id="resetProgress" class="btn-danger">Fortschritt löschen</button>
         </div>
       </div>
       <div id="banner" class="banner"></div>
@@ -274,7 +273,6 @@ const els = {
   list: document.getElementById('caseList'),
   view: document.getElementById('caseView'),
   exportEnc: document.getElementById('exportEnc'),
-  reset: document.getElementById('resetProgress'),
   showCases: document.getElementById('showCases'),
   banner: document.getElementById('banner'),
   diag: document.getElementById('diag'),
@@ -575,18 +573,6 @@ els.showCases.addEventListener('click',()=>{
   document.getElementById('caseList').scrollIntoView({behavior:'smooth'});
 });
 els.exportEnc.addEventListener('click', exportEncryptedHTML);
-els.reset.addEventListener('click',()=>{
-  if(confirm('Fortschritt wirklich löschen?')){
-    for(const k in progress) delete progress[k];
-    saveProgress();
-    if(currentCaseId) openCase(currentCaseId);
-    renderCaseList();
-    updateStats();
-    els.explanationBox.style.display = 'none';
-    els.explanationText.textContent = '';
-    showBanner('Fortschritt gelöscht.');
-  }
-});
 
 /* Screening-Overlay */
 const overlayEl = document.getElementById('overlay');
