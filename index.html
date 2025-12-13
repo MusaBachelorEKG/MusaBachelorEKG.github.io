@@ -531,7 +531,7 @@ async function syncAllSubmissions(manual=false, force=false){
     renderSyncStatus();
     const reason = manual ? '' : ' (alle 5 Fälle abgegeben)';
     showBanner('Daten wurden online gespeichert'+reason+'.');
-    if(payload.allSubmitted){
+    if(payload.allSubmitted || manual){
       showEndScreen('success');
     }
   }catch(e){
@@ -669,6 +669,7 @@ function buildImagesHTML(c){
       const progressEntry = progress[id] || { answers:{} };
       const isSubmitted = !!progressEntry.submitted;
       const dis = isSubmitted ? 'disabled' : '';
+      const caseFields = (c.fields && c.fields.length) ? c.fields : defaultFields();
 
       const fieldsHtml = (c.fields||[]).map((f)=>{
         const pObj = progress[id]||{ answers:{} };
@@ -746,9 +747,9 @@ function buildImagesHTML(c){
       const submitBtn = document.getElementById('submitCase');
       const updateSubmitButtonState = ()=>{
         if(!submitBtn) return;
-        const interpretationVal = progress[id]?.answers?.interpretation;
-        const hasInterpretation = typeof interpretationVal === 'string' && interpretationVal.trim().length > 0;
-        submitBtn.disabled = isSubmitted || !hasInterpretation;
+        const answers = progress[id]?.answers || {};
+        const allFilled = caseFields.every(f=>isFieldFilled(f, answers));
+        submitBtn.disabled = isSubmitted || !allFilled;
       };
       updateSubmitButtonState();
 
@@ -783,12 +784,10 @@ function buildImagesHTML(c){
           saveProgress();
           renderCaseList();
           updateStats();
-          if(key === 'interpretation'){
-            updateSubmitButtonState();
-          }
+          updateSubmitButtonState();
         });
       });
-      bindChoiceFields(id, c);
+      bindChoiceFields(id, c, updateSubmitButtonState);
 
       if(submitBtn){
         submitBtn.addEventListener('click', ()=>{
@@ -806,7 +805,7 @@ function buildImagesHTML(c){
     }
 adjustExplanationHeight();
 
-  function bindChoiceFields(id, c){
+  function bindChoiceFields(id, c, onChange){
     if(progress[id]?.submitted){ return; }
     document.querySelectorAll('[data-field-type="choice"]').forEach(block=>{
       const fieldKey = block.getAttribute('data-field-block');
@@ -818,6 +817,7 @@ adjustExplanationHeight();
           block.querySelectorAll('button[data-type="choice"]').forEach(b=>b.classList.toggle('active', b===btn));
           renderCaseList();
           updateStats();
+          onChange?.();
         });
       });
     });
@@ -841,6 +841,7 @@ adjustExplanationHeight();
           renderCaseList();
           updateStats();
           openCase(id);
+          onChange?.();
           return;
         }
         yesBtn?.classList.toggle('active', choice==='Ja');
@@ -848,6 +849,7 @@ adjustExplanationHeight();
         updateLeadInfo(block, leads);
         renderCaseList();
         updateStats();
+        onChange?.();
       };
       yesBtn?.addEventListener('click', ()=> setChoice('Ja'));
       noBtn?.addEventListener('click', ()=> setChoice('Nein'));
@@ -868,6 +870,7 @@ adjustExplanationHeight();
           updateLeadInfo(block, entry.leads);
           renderCaseList();
           updateStats();
+          onChange?.();
         });
       });
     });
