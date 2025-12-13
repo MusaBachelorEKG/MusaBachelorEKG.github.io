@@ -94,6 +94,8 @@
     .overlay{ position:fixed; inset:0; z-index:999; display:grid; place-items:center; padding:20px; background:rgba(7,12,20,.94); transition: opacity .25s ease, visibility .25s ease; }
     .overlay.hidden{ opacity:0; visibility:hidden; pointer-events:none }
     .scroll-lock{ overflow:hidden; padding-right: var(--sbw, 0px); }
+    body.interaction-locked{ pointer-events:none !important; }
+    body.interaction-locked *{ pointer-events:none !important; }
     .modal{ background:#0e2146; border:4px solid #ffffff; border-radius:18px; padding:22px; max-width:520px; width:100%; box-shadow:0 20px 60px rgba(0,0,0,.5) }
     .modal h2{margin:.2rem 0 .6rem 0;font-size:18px}
     .modal p{margin:.1rem 0 1rem 0;color:var(--muted)}
@@ -277,6 +279,15 @@ function unlockScroll(){
   }
 }
 
+function blockAllInteractions(){
+  document.body.classList.add('interaction-locked');
+  const focusables = document.querySelectorAll('button, input, select, textarea, a, [tabindex]');
+  focusables.forEach((el)=>{
+    if('disabled' in el){ el.disabled = true; }
+    el.setAttribute('aria-disabled','true');
+  });
+}
+
 /* ========= Profil: lokale Verschlüsselung (AES-GCM) ========= */
 const PASS_PHRASE = "ekg-app-local-protect-v1";
 const SALT_STR = "ekg-student-salt-2025";
@@ -352,18 +363,6 @@ function clearProfile(){ localStorage.removeItem(PROFILE_KEY); }
   earlySyncOverlay: document.getElementById('earlySyncOverlay'),
   earlySyncContinue: document.getElementById('earlySyncContinue'),
   earlySyncConfirm: document.getElementById('earlySyncConfirm'),
-};
-
-/* ========= Firebase (online Speicherung) ========= */
-// Firebase Web-Konfiguration (bereitgestellt)
-const firebaseConfig = window.FIREBASE_CONFIG || {
-  apiKey: 'AIzaSyBi_FTaRZQDp6CK82VnvvR_B_4bi10WJDY',
-  authDomain: 'musabachelor-ekg.firebaseapp.com',
-  projectId: 'musabachelor-ekg',
-  storageBucket: 'musabachelor-ekg.firebasestorage.app',
-  messagingSenderId: '987763555706',
-  appId: '1:987763555706:web:7b7a5206c1bae20512eac3',
-  measurementId: 'G-G619CFWZG3',
 };
 // ASCII-Schreibweise vermeiden Regel-Parser-Fehler in Firestore (keine Umlaute im Pfad)
 const FIREBASE_COLLECTION = 'MusaBachelor-EKG-Datensaetze';
@@ -617,6 +616,278 @@ function maybeSyncAfterSubmission(){
   }
 }
 
+/* ========= Firebase (online Speicherung) ========= */
+// Firebase Web-Konfiguration (bereitgestellt)
+const firebaseConfig = window.FIREBASE_CONFIG || {
+  apiKey: 'AIzaSyBi_FTaRZQDp6CK82VnvvR_B_4bi10WJDY',
+  authDomain: 'musabachelor-ekg.firebaseapp.com',
+  projectId: 'musabachelor-ekg',
+  storageBucket: 'musabachelor-ekg.firebasestorage.app',
+  messagingSenderId: '987763555706',
+  appId: '1:987763555706:web:7b7a5206c1bae20512eac3',
+  measurementId: 'G-G619CFWZG3',
+};
+// ASCII-Schreibweise vermeiden Regel-Parser-Fehler in Firestore (keine Umlaute im Pfad)
+const FIREBASE_COLLECTION = 'MusaBachelor-EKG-Datensaetze';
+const SESSION_ID_KEY = 'ekgSessionUuid';
+const UPLOAD_LOCK_KEY = 'ekgUploadLocked';
+let firebaseApp = null;
+let firestoreDb = null;
+let isSyncInFlight = false;
+let firebaseAnalytics = null;
+let syncDisabled = false;
+let firestoreProbeDone = false;
+let uploadLocked = localStorage.getItem(UPLOAD_LOCK_KEY) === '1';
+
+function hasFirebaseConfig(cfg){
+  return !!(cfg && cfg.apiKey && cfg.projectId && cfg.appId);
+}
+
+function ensureSessionId(){
+  const existing = localStorage.getItem(SESSION_ID_KEY);
+  if(existing){ return existing; }
+  const uuid = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  localStorage.setItem(SESSION_ID_KEY, uuid);
+  return uuid;
+}
+
+function renderSyncStatus(state){
+  if(!els.syncStatus) return;
+  if(syncDisabled){
+    els.syncStatus.textContent = 'Online Sync: deaktiviert';
+    els.syncStatus.style.color = 'var(--muted)';
+    els.syncStatus.style.borderColor = 'var(--line)';
+    els.syncNow.disabled = true;
+    return;
+  }
+  if(state === 'uploading'){
+    els.syncStatus.textContent = 'Online Sync: wird übertragen…';
+    els.syncStatus.style.color = 'var(--accent)';
+    els.syncStatus.style.borderColor = 'var(--accent)';
+    els.syncNow.disabled = true;
+    return;
+  }
+  if(uploadLocked){
+    els.syncStatus.textContent = 'Online Sync: nach Neustart deaktiviert';
+    els.syncStatus.style.color = 'var(--muted)';
+    els.syncStatus.style.borderColor = 'var(--line)';
+    els.syncNow.disabled = true;
+    return;
+  }
+  if(!hasFirebaseConfig(firebaseConfig)){
+    els.syncStatus.textContent = 'Online Sync: nicht konfiguriert';
+    els.syncStatus.style.color = 'var(--muted)';
+    els.syncStatus.style.borderColor = 'var(--line)';
+    els.syncNow.disabled = true;
+    return;
+  }
+  els.syncNow.disabled = false;
+  const sentAll = !!progress.__syncAllSent;
+  const isError = state === 'error';
+  els.syncStatus.textContent = sentAll ? 'Online Sync: übermittelt' : 'Online Sync: bereit';
+  els.syncStatus.style.color = isError ? 'var(--danger)' : (sentAll ? 'var(--ok)' : 'var(--ink)');
+  els.syncStatus.style.borderColor = isError ? 'var(--danger)' : 'var(--accent)';
+}
+
+function ensureFirebase(){
+  if(firestoreDb) return firestoreDb;
+  if(!hasFirebaseConfig(firebaseConfig) || !window.firebase){
+    console.warn('Firebase ist nicht konfiguriert.');
+    return null;
+  }
+  firebaseApp = firebase.initializeApp(firebaseConfig);
+  firestoreDb = firebase.firestore();
+  try{
+    if(firebase.analytics && firebaseConfig.measurementId){
+      firebaseAnalytics = firebase.analytics();
+      firebaseAnalytics.logEvent('page_view');
+      console.info('Firebase Analytics aktiviert');
+    }
+  }catch(e){
+    console.warn('Firebase Analytics konnte nicht initialisiert werden:', e);
+  }
+  return firestoreDb;
+}
+
+async function verifyFirestoreAccess(){
+  if(firestoreProbeDone || syncDisabled) return;
+  const db = ensureFirebase();
+  if(!db){
+    renderSyncStatus('error');
+    return;
+  }
+  try {
+    const probeDoc = db.collection(FIREBASE_COLLECTION).doc('__connectivity__');
+    await probeDoc.set({
+      lastChecked: firebase.firestore.FieldValue.serverTimestamp(),
+      clientSession: ensureSessionId(),
+      type: 'connectivity-check',
+    }, { merge: true });
+    firestoreProbeDone = true;
+    renderSyncStatus();
+  } catch (err) {
+    console.error('Firestore Probe fehlgeschlagen:', err);
+    if(err?.code === 'permission-denied'){
+      showBanner('Firebase Firestore verweigert den Zugriff (fehlende Schreibrechte). Bitte Firestore-Regeln auf "write-only" ohne Auth setzen.', 'error');
+    } else {
+      showBanner('Firebase Firestore ist nicht erreichbar. Bitte Einstellungen und Internet prüfen.', 'error');
+    }
+    renderSyncStatus('error');
+  }
+}
+
+function initFirebaseLink(){
+  if(syncDisabled) return;
+  if(!hasFirebaseConfig(firebaseConfig)){
+    renderSyncStatus('error');
+    return;
+  }
+  try{
+    const db = ensureFirebase();
+    if(db){
+      console.info('Firebase verbunden mit Projekt:', firebaseConfig.projectId);
+      renderSyncStatus();
+    } else {
+      renderSyncStatus('error');
+    }
+  }catch(e){
+    console.error('Firebase-Initialisierung fehlgeschlagen:', e);
+    showBanner('Firebase konnte nicht initialisiert werden. Bitte Konfiguration prüfen.', 'error');
+    renderSyncStatus('error');
+  }
+}
+
+function buildSubmissionPayload(){
+  const cases = allCases.map(c=>{
+    const entry = progress[c.id] || {};
+    return {
+      id: c.id,
+      title: c.title,
+      submitted: !!entry.submitted,
+      submittedAt: entry.submittedAt || null,
+      submittedAtTs: entry.submittedAt ? firebase.firestore.Timestamp.fromDate(new Date(entry.submittedAt)) : null,
+      answers: entry.answers || {},
+    };
+  });
+  const tableRows = cases.map(row=>({
+    id: row.id,
+    title: row.title,
+    ventr_frequenz: row.answers?.ventr_frequenz ?? '',
+    qrs_rhythmik: row.answers?.qrs_rhythmik ?? '',
+    qrs_breite: row.answers?.qrs_breite ?? '',
+    vorhofaktivitaet: row.answers?.vorhofaktivitaet ?? '',
+    av_kopplung: row.answers?.av_kopplung ?? '',
+    st_strecke: formatStAnswer(row.answers?.st_strecke),
+    interpretation: row.answers?.interpretation ?? '',
+    submitted: row.submitted,
+    submittedAt: row.submittedAt,
+    submittedAtTs: row.submittedAtTs,
+  }));
+  return {
+    sessionId: ensureSessionId(),
+    createdAt: firebase.firestore.Timestamp.now(),
+    cases,
+    nestedCases: cases,
+    tableRows,
+    flatTableRows: tableRows,
+    completedCases: cases.filter(x=>x.submitted).length,
+    allSubmitted: cases.length ? cases.every(x=>x.submitted) : false,
+    screening: {...qAnswers},
+    formats: {
+      nested: 'nestedCases',
+      tabular: 'flatTableRows',
+    },
+  };
+}
+
+function showEarlySyncPrompt(){
+  if(!els.earlySyncOverlay){
+    showBanner('Bitte bearbeite möglichst alle 5 Fälle vor der Online-Speicherung.', 'warn');
+    return;
+  }
+  els.earlySyncOverlay.classList.remove('hidden');
+  lockScroll();
+}
+
+function hideEarlySyncPrompt(){
+  if(!els.earlySyncOverlay) return;
+  els.earlySyncOverlay.classList.add('hidden');
+  unlockScroll();
+}
+
+async function syncAllSubmissions(manual=false, force=false){
+  if(syncDisabled){
+    showBanner('Online-Speicherung ist deaktiviert.', 'warn');
+    return;
+  }
+  const db = ensureFirebase();
+  if(!db){
+    showBanner('Firebase ist nicht eingerichtet. Bitte Konfigurationsdaten eintragen.', 'warn');
+    renderSyncStatus('error');
+    return;
+  }
+  if(isSyncInFlight){ return; }
+  if(manual && !force && !allCasesSubmitted()){
+    showEarlySyncPrompt();
+    return;
+  }
+  isSyncInFlight = true;
+  renderSyncStatus('uploading');
+  showBanner('Daten werden online gespeichert. Bitte warten…');
+  try{
+    const payload = buildSubmissionPayload();
+    const profile = await loadProfile();
+    payload.profileStatus = profile?.status || 'unknown';
+    payload.sessionDocId = payload.sessionId;
+    const docRef = db.collection(FIREBASE_COLLECTION).doc(payload.sessionId);
+    const writePromise = docRef.set({
+      ...payload,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      clientCreatedAt: payload.createdAt,
+    });
+    const timeoutMs = 15000;
+    await Promise.race([
+      writePromise,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout bei der Online-Übertragung. Bitte Internet prüfen.')), timeoutMs)),
+    ]);
+    progress.__syncAllSent = payload.allSubmitted;
+    saveProgress();
+    renderSyncStatus();
+    const reason = manual ? '' : ' (alle 5 Fälle abgegeben)';
+    showBanner('Daten wurden online gespeichert'+reason+'.');
+    if(payload.allSubmitted || manual){
+      showEndScreen('success');
+    }
+  }catch(e){
+    console.error('Sync fehlgeschlagen:', e);
+    if(e?.code === 'permission-denied'){
+      showBanner('Konnte Daten nicht an Firebase senden: fehlende Schreibrechte. Bitte Firestore-Regeln auf "write-only" ohne Auth setzen.', 'error');
+    } else {
+      showBanner('Konnte Daten nicht an Firebase senden: '+(e?.message||e), 'error');
+    }
+    showEndScreen('error');
+    renderSyncStatus('error');
+  }finally{
+    els.syncNow.disabled = false;
+    isSyncInFlight = false;
+    if(!progress.__syncAllSent){
+      renderSyncStatus();
+    }
+  }
+}
+
+function allCasesSubmitted(){
+  return allCases.length > 0 && allCases.every(c=>progress[c.id]?.submitted);
+}
+
+function maybeSyncAfterSubmission(){
+  if(allCasesSubmitted() && !progress.__syncAllSent){
+    syncAllSubmissions();
+  } else {
+    renderSyncStatus();
+  }
+}
+
 /* ========= Banner ========= */
 function showBanner(text, kind=''){ els.banner.textContent=text; els.banner.className='banner '+(kind||''); els.banner.style.display='block'; }
 
@@ -646,13 +917,25 @@ function hideEndScreen(){
 
 function closeTabFromEndScreen(){
   hideEndScreen();
-  setTimeout(()=>{
+  let closed = false;
+  try{
     window.open('', '_self');
     window.close();
-  }, 50);
+    closed = window.closed;
+  }catch(e){
+    closed = false;
+  }
+  setTimeout(()=>{
+    if(!closed && !window.closed){
+      blockAllInteractions();
+      showBanner('Fenster konnte nicht automatisch geschlossen werden. Alle Eingaben wurden gesperrt.', 'warn');
+    }
+  }, 150);
 }
 
   function clearCachesForRestart(){
+    uploadLocked = true;
+    localStorage.setItem(UPLOAD_LOCK_KEY, '1');
     syncDisabled = true;
     els.syncNow.disabled = true;
     renderSyncStatus('disabled');
@@ -681,6 +964,11 @@ function saveProgress(){ localStorage.setItem(LS_KEY, JSON.stringify(progress));
 // Wird beim Start ausgeführt, sobald der DOM bereit ist.
 async function bootstrapApp(){
   try{
+    if(uploadLocked){
+      syncDisabled = true;
+      renderSyncStatus('disabled');
+      showBanner('Online-Speicherung ist nach Neustart deaktiviert.', 'warn');
+    }
     renderSyncStatus();
     initFirebaseLink();
     await verifyFirestoreAccess();
