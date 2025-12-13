@@ -20,7 +20,6 @@ Entschieden für den Live-Betrieb:
 1. **Ziel in Firestore**
    - Sammlung: **`MusaBachelor-EKG-Datensätze`**
    - Dokument-ID: **Session UUID** (wird clientseitig pro Sitzung erzeugt und wiederverwendet)
-   - Sequenz/Nummerierung: Platzhalter für **Cloud Function** (`MusaBachelor-EKG-Datensätze-Sequence`) und parallel ein clientseitiger Zähler.
 
 2. **Sicherheitskonzept**
    - Keine Authentifizierung; **nur Schreiben**, kein Lesen (Firestore Rules: `allow write: if true; allow read: if false;`).

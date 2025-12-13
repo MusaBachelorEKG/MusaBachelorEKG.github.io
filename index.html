@@ -366,9 +366,7 @@ const firebaseConfig = window.FIREBASE_CONFIG || {
   measurementId: 'G-G619CFWZG3',
 };
 const FIREBASE_COLLECTION = 'MusaBachelor-EKG-Datensätze';
-const SUBMISSION_COUNTER_KEY = 'ekgSubmissionCounter';
 const SESSION_ID_KEY = 'ekgSessionUuid';
-const CLOUD_FUNCTION_NAME = 'MusaBachelor-EKG-Datensätze-Sequence';
 let firebaseApp = null;
 let firestoreDb = null;
 let isSyncInFlight = false;
@@ -452,13 +450,6 @@ function initFirebaseLink(){
   }
 }
 
-function nextSubmissionNumber(){
-  const current = Number(localStorage.getItem(SUBMISSION_COUNTER_KEY) || '0');
-  const next = current + 1;
-  localStorage.setItem(SUBMISSION_COUNTER_KEY, String(next));
-  return next;
-}
-
 function buildSubmissionPayload(){
   const cases = allCases.map(c=>{
     const entry = progress[c.id] || {};
@@ -522,11 +513,11 @@ async function syncAllSubmissions(manual=false, force=false){
     showBanner('Online-Speicherung ist deaktiviert.', 'warn');
     return;
   }
-  const db = ensureFirebase();
-  if(!db){
-    showBanner('Firebase ist nicht eingerichtet. Bitte Konfigurationsdaten eintragen.', 'warn');
-    renderSyncStatus('error');
-    return;
+    const db = ensureFirebase();
+    if(!db){
+      showBanner('Firebase ist nicht eingerichtet. Bitte Konfigurationsdaten eintragen.', 'warn');
+      renderSyncStatus('error');
+      return;
   }
   if(isSyncInFlight){ return; }
   if(manual && !force && !allCasesSubmitted()){
@@ -534,219 +525,15 @@ async function syncAllSubmissions(manual=false, force=false){
     return;
   }
   isSyncInFlight = true;
-  try{
-    const payload = buildSubmissionPayload();
-    const profile = await loadProfile();
-    payload.profileStatus = profile?.status || 'unknown';
-    payload.submissionNumber = nextSubmissionNumber();
-    payload.cloudFunction = CLOUD_FUNCTION_NAME;
-    payload.sessionDocId = payload.sessionId;
-    const docRef = db.collection(FIREBASE_COLLECTION).doc(payload.sessionId);
-    await docRef.set({
-      ...payload,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      clientCreatedAt: payload.createdAt,
-    });
-    progress.__syncAllSent = payload.allSubmitted;
-    saveProgress();
-    renderSyncStatus();
-    const reason = manual ? '' : ' (alle 5 Fälle abgegeben)';
-    showBanner('Daten wurden online gespeichert'+reason+'.');
-    if(payload.allSubmitted || manual){
-      showEndScreen('success');
-    }
-  }catch(e){
-    console.error('Sync fehlgeschlagen:', e);
-    showBanner('Konnte Daten nicht an Firebase senden: '+(e?.message||e), 'error');
-    showEndScreen('error');
-    renderSyncStatus('error');
-  }finally{
-    isSyncInFlight = false;
-  }
-}
-
-function allCasesSubmitted(){
-  return allCases.length > 0 && allCases.every(c=>progress[c.id]?.submitted);
-}
-
-function maybeSyncAfterSubmission(){
-  if(allCasesSubmitted() && !progress.__syncAllSent){
-    syncAllSubmissions();
-  } else {
-    renderSyncStatus();
-  }
-}
-
-/* ========= Firebase (online Speicherung) ========= */
-// Firebase Web-Konfiguration (bereitgestellt)
-const firebaseConfig = window.FIREBASE_CONFIG || {
-  apiKey: 'AIzaSyBi_FTaRZQDp6CK82VnvvR_B_4bi10WJDY',
-  authDomain: 'musabachelor-ekg.firebaseapp.com',
-  projectId: 'musabachelor-ekg',
-  storageBucket: 'musabachelor-ekg.firebasestorage.app',
-  messagingSenderId: '987763555706',
-  appId: '1:987763555706:web:7b7a5206c1bae20512eac3',
-  measurementId: 'G-G619CFWZG3',
-};
-const FIREBASE_COLLECTION = 'MusaBachelor-EKG-Datensätze';
-const SUBMISSION_COUNTER_KEY = 'ekgSubmissionCounter';
-const SESSION_ID_KEY = 'ekgSessionUuid';
-const CLOUD_FUNCTION_NAME = 'MusaBachelor-EKG-Datensätze-Sequence';
-let firebaseApp = null;
-let firestoreDb = null;
-let isSyncInFlight = false;
-let firebaseAnalytics = null;
-let syncDisabled = false;
-
-function hasFirebaseConfig(cfg){
-  return !!(cfg && cfg.apiKey && cfg.projectId && cfg.appId);
-}
-
-function ensureSessionId(){
-  const existing = localStorage.getItem(SESSION_ID_KEY);
-  if(existing){ return existing; }
-  const uuid = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  localStorage.setItem(SESSION_ID_KEY, uuid);
-  return uuid;
-}
-
-function renderSyncStatus(state){
-  if(!els.syncStatus) return;
-  if(syncDisabled){
-    els.syncStatus.textContent = 'Online Sync: deaktiviert';
-    els.syncStatus.style.color = 'var(--muted)';
-    els.syncStatus.style.borderColor = 'var(--line)';
-    els.syncNow.disabled = true;
-    return;
-  }
-  if(!hasFirebaseConfig(firebaseConfig)){
-    els.syncStatus.textContent = 'Online Sync: nicht konfiguriert';
-    els.syncStatus.style.color = 'var(--muted)';
-    els.syncStatus.style.borderColor = 'var(--line)';
-    els.syncNow.disabled = true;
-    return;
-  }
-  els.syncNow.disabled = false;
-  const sentAll = !!progress.__syncAllSent;
-  const isError = state === 'error';
-  els.syncStatus.textContent = sentAll ? 'Online Sync: übermittelt' : 'Online Sync: bereit';
-  els.syncStatus.style.color = isError ? 'var(--danger)' : (sentAll ? 'var(--ok)' : 'var(--ink)');
-  els.syncStatus.style.borderColor = isError ? 'var(--danger)' : 'var(--accent)';
-}
-
-function ensureFirebase(){
-  if(firestoreDb) return firestoreDb;
-  if(!hasFirebaseConfig(firebaseConfig) || !window.firebase){
-    console.warn('Firebase ist nicht konfiguriert.');
-    return null;
-  }
-  firebaseApp = firebase.initializeApp(firebaseConfig);
-  firestoreDb = firebase.firestore();
-  try{
-    if(firebase.analytics && firebaseConfig.measurementId){
-      firebaseAnalytics = firebase.analytics();
-      firebaseAnalytics.logEvent('page_view');
-      console.info('Firebase Analytics aktiviert');
-    }
-  }catch(e){
-    console.warn('Firebase Analytics konnte nicht initialisiert werden:', e);
-  }
-  return firestoreDb;
-}
-
-function nextSubmissionNumber(){
-  const current = Number(localStorage.getItem(SUBMISSION_COUNTER_KEY) || '0');
-  const next = current + 1;
-  localStorage.setItem(SUBMISSION_COUNTER_KEY, String(next));
-  return next;
-}
-
-function buildSubmissionPayload(){
-  const cases = allCases.map(c=>{
-    const entry = progress[c.id] || {};
-    return {
-      id: c.id,
-      title: c.title,
-      submitted: !!entry.submitted,
-      submittedAt: entry.submittedAt || null,
-      submittedAtTs: entry.submittedAt ? firebase.firestore.Timestamp.fromDate(new Date(entry.submittedAt)) : null,
-      answers: entry.answers || {},
-    };
-  });
-  const tableRows = cases.map(row=>({
-    id: row.id,
-    title: row.title,
-    ventr_frequenz: row.answers?.ventr_frequenz ?? '',
-    qrs_rhythmik: row.answers?.qrs_rhythmik ?? '',
-    qrs_breite: row.answers?.qrs_breite ?? '',
-    vorhofaktivitaet: row.answers?.vorhofaktivitaet ?? '',
-    av_kopplung: row.answers?.av_kopplung ?? '',
-    st_strecke: formatStAnswer(row.answers?.st_strecke),
-    interpretation: row.answers?.interpretation ?? '',
-    submitted: row.submitted,
-    submittedAt: row.submittedAt,
-    submittedAtTs: row.submittedAtTs,
-  }));
-  return {
-    sessionId: ensureSessionId(),
-    createdAt: firebase.firestore.Timestamp.now(),
-    cases,
-    nestedCases: cases,
-    tableRows,
-    flatTableRows: tableRows,
-    completedCases: cases.filter(x=>x.submitted).length,
-    allSubmitted: cases.length ? cases.every(x=>x.submitted) : false,
-    screening: {...qAnswers},
-    formats: {
-      nested: 'nestedCases',
-      tabular: 'flatTableRows',
-    },
-  };
-}
-
-function showEarlySyncPrompt(){
-  if(!els.earlySyncOverlay){
-    showBanner('Bitte bearbeite möglichst alle 5 Fälle vor der Online-Speicherung.', 'warn');
-    return;
-  }
-  els.earlySyncOverlay.classList.remove('hidden');
-  lockScroll();
-}
-
-function hideEarlySyncPrompt(){
-  if(!els.earlySyncOverlay) return;
-  els.earlySyncOverlay.classList.add('hidden');
-  unlockScroll();
-}
-
-async function syncAllSubmissions(manual=false, force=false){
-  if(syncDisabled){
-    showBanner('Online-Speicherung ist deaktiviert.', 'warn');
-    return;
-  }
-  const db = ensureFirebase();
-  if(!db){
-    showBanner('Firebase ist nicht eingerichtet. Bitte Konfigurationsdaten eintragen.', 'warn');
-    renderSyncStatus('error');
-    return;
-  }
-  if(isSyncInFlight){ return; }
-  if(manual && !force && !allCasesSubmitted()){
-    showEarlySyncPrompt();
-    return;
-  }
-  isSyncInFlight = true;
-  try{
-    const payload = buildSubmissionPayload();
-    const profile = await loadProfile();
-    payload.profileStatus = profile?.status || 'unknown';
-    payload.submissionNumber = nextSubmissionNumber();
-    payload.cloudFunction = CLOUD_FUNCTION_NAME;
-    payload.sessionDocId = payload.sessionId;
-    const docRef = db.collection(FIREBASE_COLLECTION).doc(payload.sessionId);
-    await docRef.set({
-      ...payload,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    try{
+      const payload = buildSubmissionPayload();
+      const profile = await loadProfile();
+      payload.profileStatus = profile?.status || 'unknown';
+      payload.sessionDocId = payload.sessionId;
+      const docRef = db.collection(FIREBASE_COLLECTION).doc(payload.sessionId);
+      await docRef.set({
+        ...payload,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       clientCreatedAt: payload.createdAt,
     });
     progress.__syncAllSent = payload.allSubmitted;
@@ -806,16 +593,15 @@ function hideEndScreen(){
   unlockScroll();
 }
 
-function clearCachesForRestart(){
-  syncDisabled = true;
-  els.syncNow.disabled = true;
-  renderSyncStatus('disabled');
-  localStorage.removeItem(LS_KEY);
-  localStorage.removeItem(SESSION_ID_KEY);
-  localStorage.removeItem(SUBMISSION_COUNTER_KEY);
-  clearProfile();
-  Object.keys(progress).forEach((k) => delete progress[k]);
-}
+  function clearCachesForRestart(){
+    syncDisabled = true;
+    els.syncNow.disabled = true;
+    renderSyncStatus('disabled');
+    localStorage.removeItem(LS_KEY);
+    localStorage.removeItem(SESSION_ID_KEY);
+    clearProfile();
+    Object.keys(progress).forEach((k) => delete progress[k]);
+  }
 
 function restartSession(){
   clearCachesForRestart();
