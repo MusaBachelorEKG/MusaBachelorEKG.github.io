@@ -394,6 +394,13 @@ function renderSyncStatus(state){
     els.syncNow.disabled = true;
     return;
   }
+  if(state === 'uploading'){
+    els.syncStatus.textContent = 'Online Sync: wird übertragen…';
+    els.syncStatus.style.color = 'var(--accent)';
+    els.syncStatus.style.borderColor = 'var(--accent)';
+    els.syncNow.disabled = true;
+    return;
+  }
   if(!hasFirebaseConfig(firebaseConfig)){
     els.syncStatus.textContent = 'Online Sync: nicht konfiguriert';
     els.syncStatus.style.color = 'var(--muted)';
@@ -525,6 +532,8 @@ async function syncAllSubmissions(manual=false, force=false){
     return;
   }
   isSyncInFlight = true;
+  renderSyncStatus('uploading');
+  showBanner('Daten werden online gespeichert. Bitte warten…');
     try{
       const payload = buildSubmissionPayload();
       const profile = await loadProfile();
@@ -550,6 +559,7 @@ async function syncAllSubmissions(manual=false, force=false){
     showEndScreen('error');
     renderSyncStatus('error');
   }finally{
+    els.syncNow.disabled = false;
     isSyncInFlight = false;
   }
 }
