@@ -32,3 +32,7 @@ Entschieden für den Live-Betrieb:
      - **Tabellarisch** (`flatTableRows` als flache Zeilenstruktur mit klaren Spaltennamen).
 
 Damit sind alle Parameter gesetzt; das Frontend erzeugt und speichert die Datensätze entsprechend dieser Vorgaben.
+
+### Firestore-Konnektivität
+- Die App initialisiert Firebase/Firestore beim Laden und schreibt einmalig ein `__connectivity__`-Dokument in die Sammlung **MusaBachelor-EKG-Datensätze** (Felder: `lastChecked` via `serverTimestamp`, `clientSession`, `type: connectivity-check`).
+- So erkennst du, ob die Verbindung und die Schreibrechte aktiv sind, ohne einen kompletten Upload abzuwarten.

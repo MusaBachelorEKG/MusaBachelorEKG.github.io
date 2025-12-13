@@ -372,6 +372,7 @@ let firestoreDb = null;
 let isSyncInFlight = false;
 let firebaseAnalytics = null;
 let syncDisabled = false;
+let firestoreProbeDone = false;
 
 function hasFirebaseConfig(cfg){
   return !!(cfg && cfg.apiKey && cfg.projectId && cfg.appId);
@@ -434,6 +435,29 @@ function ensureFirebase(){
     console.warn('Firebase Analytics konnte nicht initialisiert werden:', e);
   }
   return firestoreDb;
+}
+
+async function verifyFirestoreAccess(){
+  if(firestoreProbeDone || syncDisabled) return;
+  const db = ensureFirebase();
+  if(!db){
+    renderSyncStatus('error');
+    return;
+  }
+  try {
+    const probeDoc = db.collection(FIREBASE_COLLECTION).doc('__connectivity__');
+    await probeDoc.set({
+      lastChecked: firebase.firestore.FieldValue.serverTimestamp(),
+      clientSession: ensureSessionId(),
+      type: 'connectivity-check',
+    }, { merge: true });
+    firestoreProbeDone = true;
+    renderSyncStatus();
+  } catch (err) {
+    console.error('Firestore Probe fehlgeschlagen:', err);
+    showBanner('Firebase Firestore ist nicht erreichbar. Bitte Einstellungen und Internet prüfen.', 'error');
+    renderSyncStatus('error');
+  }
 }
 
 function initFirebaseLink(){
@@ -540,11 +564,16 @@ async function syncAllSubmissions(manual=false, force=false){
       payload.profileStatus = profile?.status || 'unknown';
       payload.sessionDocId = payload.sessionId;
       const docRef = db.collection(FIREBASE_COLLECTION).doc(payload.sessionId);
-      await docRef.set({
+      const writePromise = docRef.set({
         ...payload,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      clientCreatedAt: payload.createdAt,
-    });
+        clientCreatedAt: payload.createdAt,
+      });
+      const timeoutMs = 15000;
+      await Promise.race([
+        writePromise,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout bei der Online-Übertragung. Bitte Internet prüfen.')), timeoutMs)),
+      ]);
     progress.__syncAllSent = payload.allSubmitted;
     saveProgress();
     renderSyncStatus();
@@ -561,6 +590,9 @@ async function syncAllSubmissions(manual=false, force=false){
   }finally{
     els.syncNow.disabled = false;
     isSyncInFlight = false;
+    if(!progress.__syncAllSent){
+      renderSyncStatus();
+    }
   }
 }
 
@@ -631,6 +663,7 @@ function saveProgress(){ localStorage.setItem(LS_KEY, JSON.stringify(progress));
 
 renderSyncStatus();
 initFirebaseLink();
+verifyFirestoreAccess();
 
 function updateStats(){
     const finished = allCases.filter(hasAnswers).length;
