@@ -244,6 +244,18 @@ Abed El Rahim, Musa</p>
     </div>
   </div>
 
+  <!-- Vorzeitige Sync-Bestätigung -->
+  <div class="overlay hidden" id="earlySyncOverlay" aria-live="polite">
+    <div class="modal">
+      <h2>Vorzeitige Abgabe?</h2>
+      <p>Sind Sie sicher, dass Sie vorzeitig abgeben wollen? Es ist wichtig für eine gute Auswertung, dass so viel wie möglich interpretiert wird.</p>
+      <div class="actions" style="justify-content:flex-end">
+        <button type="button" class="btn-ghost" id="earlySyncContinue">Ja, ich möchte weiter machen</button>
+        <button type="button" class="btn-danger" id="earlySyncConfirm">Ja, ich möchte vorzeitig beenden</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 // ===== Scroll-Lock Helpers =====
 let __overlayLocks = 0;
@@ -334,6 +346,9 @@ const els = {
   endTitle: document.getElementById('endTitle'),
   endSubtitle: document.getElementById('endSubtitle'),
   endClose: document.getElementById('endClose'),
+  earlySyncOverlay: document.getElementById('earlySyncOverlay'),
+  earlySyncContinue: document.getElementById('earlySyncContinue'),
+  earlySyncConfirm: document.getElementById('earlySyncConfirm'),
 };
 
 /* ========= Firebase (online Speicherung) ========= */
@@ -453,7 +468,22 @@ function buildSubmissionPayload(){
   };
 }
 
-async function syncAllSubmissions(manual=false){
+function showEarlySyncPrompt(){
+  if(!els.earlySyncOverlay){
+    showBanner('Bitte bearbeite möglichst alle 5 Fälle vor der Online-Speicherung.', 'warn');
+    return;
+  }
+  els.earlySyncOverlay.classList.remove('hidden');
+  lockScroll();
+}
+
+function hideEarlySyncPrompt(){
+  if(!els.earlySyncOverlay) return;
+  els.earlySyncOverlay.classList.add('hidden');
+  unlockScroll();
+}
+
+async function syncAllSubmissions(manual=false, force=false){
   const db = ensureFirebase();
   if(!db){
     showBanner('Firebase ist nicht eingerichtet. Bitte Konfigurationsdaten eintragen.', 'warn');
@@ -461,6 +491,10 @@ async function syncAllSubmissions(manual=false){
     return;
   }
   if(isSyncInFlight){ return; }
+  if(manual && !force && !allCasesSubmitted()){
+    showEarlySyncPrompt();
+    return;
+  }
   isSyncInFlight = true;
   try{
     const payload = buildSubmissionPayload();
@@ -847,6 +881,9 @@ function loadCases(json){
 /* ========= Event Handler ========= */
 els.endClose?.addEventListener('click', hideEndScreen);
 els.endOverlay?.addEventListener('click', e=>{ if(e.target === els.endOverlay){ hideEndScreen(); } });
+els.earlySyncContinue?.addEventListener('click', ()=>{ hideEarlySyncPrompt(); showBanner('Bitte bearbeite möglichst alle 5 Fälle vor der Abgabe.', 'warn'); });
+els.earlySyncConfirm?.addEventListener('click', ()=>{ hideEarlySyncPrompt(); syncAllSubmissions(true, true); });
+els.earlySyncOverlay?.addEventListener('click', e=>{ if(e.target === els.earlySyncOverlay){ hideEarlySyncPrompt(); } });
 
 els.showCases.addEventListener('click',()=>{
   renderCaseList();
