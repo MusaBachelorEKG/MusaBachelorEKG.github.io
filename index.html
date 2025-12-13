@@ -116,6 +116,14 @@
 
     /* Profil-Overlay Hintergrund bleibt dunkel, ohne Blur */
     #overlay{ background:rgba(7,10,16,.96); }
+
+    /* Feldaktionen: Button-Gruppen für Ja/Nein & Auswahlfelder */
+    .choice-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+    .choice-row button.active{background:var(--accent);color:#04182d}
+    .lead-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:6px;margin-top:10px;background:#0b1f41;border:1px solid var(--line);border-radius:12px;padding:10px}
+    .lead-grid button{width:100%;padding:8px 10px}
+    .lead-grid button.active{background:var(--accent-2);color:#052e16}
+    .small-note{color:var(--muted);font-size:12px;margin-top:4px}
   </style>
 </head>
 <body>
@@ -308,6 +316,18 @@ function updateStats(){
 function adjustExplanationHeight(){ const box=document.getElementById('explanationBox'); if(box){ box.style.maxHeight='none'; } }
 window.addEventListener('resize', adjustExplanationHeight);
 
+function isFieldFilled(f, answers={}){
+  if(f.fixed) return true;
+  const val = answers[f.key];
+  if(f.type === 'choice'){
+    return typeof val === 'string' && val.trim().length>0;
+  }
+  if(f.type === 'st'){
+    return !!(val && val.choice && (val.choice === 'Nein' || (Array.isArray(val.leads) && val.leads.length>0)));
+  }
+  return typeof val === 'string' && val.trim().length>0;
+}
+
 function renderCaseList(){
   if(allCases.length===0){ els.list.innerHTML='<div class="small">Keine Fälle.</div>'; return; }
   els.list.innerHTML = allCases.map(c=>{
@@ -336,6 +356,8 @@ function openCase(id){
   if(!c){ showBanner('Interner Fehler: Fall nicht gefunden','error'); return; }
   const p = progress[id]||{ answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null };
   const isLocked = !!p.locked;
+  const showSolution = p.checked && p.lastOk === true;
+  const showRestart = isLocked && p.lastOk === false;
 
   const fieldsHtml = (c.fields||[]).map((f)=>{
     const pObj = progress[id]||{ answers:{} };
@@ -344,12 +366,36 @@ function openCase(id){
       pObj.answers = pObj.answers || {}; pObj.answers[f.key] = val; progress[id] = pObj; saveProgress();
       return `<div><div class="small">${f.label}</div><div style="background:#0b1f41;border:1px solid var(--line);border-radius:12px;padding:10px;color:#cdd7eb">${val}</div></div>`;
     }
-    const val = (pObj.answers && pObj.answers[f.key]) || '';
     const dis = isLocked ? 'disabled' : '';
-    return `<div><div class="small">${f.label}</div><textarea ${dis} data-key="${f.key}" placeholder="${f.placeholder||''}">${val}</textarea></div>`;
+    const val = pObj.answers ? pObj.answers[f.key] : '';
+    if(f.type === 'choice'){
+      const selected = typeof val === 'string' ? val : '';
+      const buttons = (f.options||[]).map(opt=>{
+        const active = selected === opt ? 'active' : '';
+        return `<button type="button" class="btn-ghost ${active}" data-type="choice" data-field="${f.key}" data-value="${opt}" ${dis}>${opt}</button>`;
+      }).join('');
+      return `<div data-field-block="${f.key}" data-field-type="choice"><div class="small">${f.label}</div><div class="choice-row">${buttons}</div></div>`;
+    }
+    if(f.type === 'st'){
+      const valueObj = (val && typeof val === 'object') ? val : {choice:'', leads:[]};
+      const yesActive = valueObj.choice === 'Ja' ? 'active' : '';
+      const noActive = valueObj.choice === 'Nein' ? 'active' : '';
+      const leads = ['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6'];
+      const leadButtons = leads.map(ld=>{
+        const active = valueObj.leads?.includes(ld) ? 'active' : '';
+        return `<button type="button" class="btn-ghost ${active}" data-lead="${ld}" ${dis}>${ld}</button>`;
+      }).join('');
+      const leadInfo = valueObj.leads?.length ? `Ausgewählt: ${valueObj.leads.join(', ')}` : 'Bitte wähle mindestens eine Ableitung.';
+      const leadBlock = valueObj.choice === 'Ja'
+        ? `<div class="lead-grid">${leadButtons}</div><div class="small-note">${leadInfo}</div>`
+        : '';
+      return `<div data-field-block="${f.key}" data-field-type="st"><div class="small">${f.label}</div><div class="choice-row"><button type="button" class="btn-ghost ${yesActive}" data-value="Ja" ${dis}>Ja</button><button type="button" class="btn-ghost ${noActive}" data-value="Nein" ${dis}>Nein</button></div>${leadBlock}</div>`;
+    }
+    const textVal = typeof val === 'string' ? val : '';
+    return `<div><div class="small">${f.label}</div><textarea ${dis} data-key="${f.key}" placeholder="${f.placeholder||''}">${textVal}</textarea></div>`;
   }).join('');
 
-  const readyForMC = (c.fields||[]).filter(f=>!f.fixed).every(f=> (p.answers?.[f.key]||'').trim().length>0 );
+  const readyForMC = (c.fields||[]).filter(f=>!f.fixed).every(f=>isFieldFilled(f, p.answers||{}));
   const options = Array.isArray(c.options) ? c.options : [];
   const optionsHtml = options.map((opt,idx)=>{
     const letter = String.fromCharCode(65+idx);
@@ -368,7 +414,6 @@ function openCase(id){
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <span class="badge">Versuche: <b id="attemptCount">${p.attempts||0}</b></span>
-        ${ isLocked ? `<button id="restartCase" class="btn-success">Neu starten</button>` : '' }
       </div>
     </div>
     <div class="hr"></div>
@@ -389,12 +434,16 @@ function openCase(id){
           <button class="btn-accent" id="checkBtn" ${isLocked?'disabled':''}>Abgeben & prüfen</button>
           <button id="clearChoice" class="btn-ghost" ${isLocked?'disabled':''}>Auswahl löschen</button>
           <div id="resultBox" class="small" style="margin-top:8px"></div>
-          ${ p.checked ? `
+          ${ showSolution ? `
             <div class="spacer"></div>
             <div class="small">
               <span class="muted">Lösung:</span> <b>${c.correct||'?'}</b> – ${correctText}<br>
               <span class="muted">${c.solution||''}</span>
             </div>` : '' }
+          ${ showRestart ? `
+            <div class="spacer"></div>
+            <button id="restartCase" class="btn-success">Neu starten</button>
+          ` : '' }
         </div>
       </div>
     </div>
@@ -430,11 +479,12 @@ function openCase(id){
         progress[id] = progress[id] || {answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null};
         progress[id].answers[key] = t.value;
         saveProgress();
-        const ready = (c.fields||[]).filter(f=>!f.fixed).every(f=> (progress[id].answers[f.key]||'').trim().length>0 );
+        const ready = (c.fields||[]).filter(f=>!f.fixed).every(f=>isFieldFilled(f, progress[id].answers));
         const mcEl = document.getElementById('mc');
         if(mcEl){ mcEl.classList.toggle('show', ready); }
       });
     });
+    bindChoiceFields(id, c, isLocked);
   }
 
   const mcEl = document.getElementById('mc');
@@ -483,15 +533,87 @@ function openCase(id){
 }
 adjustExplanationHeight();
 
+function bindChoiceFields(id, c){
+  const updateMCReady = () => {
+    const answers = progress[id]?.answers || {};
+    const ready = (c.fields||[]).filter(f=>!f.fixed).every(f=>isFieldFilled(f, answers));
+    const mcEl = document.getElementById('mc');
+    if(mcEl){ mcEl.classList.toggle('show', ready); }
+  };
+
+  document.querySelectorAll('[data-field-type="choice"]').forEach(block=>{
+    const fieldKey = block.getAttribute('data-field-block');
+    block.querySelectorAll('button[data-type="choice"]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        progress[id] = progress[id] || {answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null};
+        progress[id].answers[fieldKey] = btn.dataset.value;
+        saveProgress();
+        block.querySelectorAll('button[data-type="choice"]').forEach(b=>b.classList.toggle('active', b===btn));
+        updateMCReady();
+      });
+    });
+  });
+
+  document.querySelectorAll('[data-field-type="st"]').forEach(block=>{
+    const fieldKey = block.getAttribute('data-field-block');
+    const yesBtn = block.querySelector('button[data-value="Ja"]');
+    const noBtn = block.querySelector('button[data-value="Nein"]');
+    const ensureProgress = ()=>{
+      progress[id] = progress[id] || {answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null};
+      if(!progress[id].answers[fieldKey]){ progress[id].answers[fieldKey] = {choice:'', leads:[]}; }
+    };
+    const setChoice = (choice)=>{
+      ensureProgress();
+      const current = progress[id].answers[fieldKey];
+      const leads = choice === 'Ja' ? (current.leads || []) : [];
+      progress[id].answers[fieldKey] = { choice, leads };
+      saveProgress();
+      if(choice === 'Nein' || (choice === 'Ja' && !block.querySelector('.lead-grid'))){
+        openCase(id);
+        return;
+      }
+      yesBtn?.classList.toggle('active', choice==='Ja');
+      noBtn?.classList.toggle('active', choice==='Nein');
+      updateLeadInfo(block, leads);
+      updateMCReady();
+    };
+    yesBtn?.addEventListener('click', ()=> setChoice('Ja'));
+    noBtn?.addEventListener('click', ()=> setChoice('Nein'));
+
+    block.querySelectorAll('[data-lead]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        ensureProgress();
+        const entry = progress[id].answers[fieldKey];
+        if(entry.choice !== 'Ja'){ return; }
+        const lead = btn.dataset.lead;
+        const leads = new Set(entry.leads||[]);
+        leads.has(lead) ? leads.delete(lead) : leads.add(lead);
+        entry.leads = Array.from(leads);
+        progress[id].answers[fieldKey] = entry;
+        saveProgress();
+        btn.classList.toggle('active');
+        updateLeadInfo(block, entry.leads);
+        updateMCReady();
+      });
+    });
+  });
+}
+
+function updateLeadInfo(block, leads){
+  const note = block.querySelector('.small-note');
+  if(!note) return;
+  note.textContent = (leads && leads.length) ? `Ausgewählt: ${leads.join(', ')}` : 'Bitte wähle mindestens eine Ableitung.';
+}
+
 function defaultFields(){
   return [
-    {key:'elektromechanik', label:'Elektrische und mechanische Aktivität vorhanden?', fixed:true, fixedValue:'Ja'},
+    {key:'elektromechanik', label:'Elektrische und mechanische Aktivität vorhanden?', fixed:true, fixedValue:'Ja – 50mm/s Schreibgeschwindigkeit'},
     {key:'ventr_frequenz', label:'Ventrikuläre Frequenz (∕min)', placeholder:'z. B. 78∕min'},
-    {key:'qrs_rhythmik', label:'QRS-Komplexe: rhythmisch oder arrhythmisch?', placeholder:'rhythmisch/arrhythmisch + Begründung'},
-    {key:'qrs_breite', label:'QRS-Komplexe: schmal oder breit?', placeholder:'schmal/breit + Dauer in s (falls bekannt)'},
-    {key:'vorhofaktivitaet', label:'Vorhofaktivität vorhanden?', placeholder:'ja/nein/unklar; P-Wellen sichtbar?'},
-    {key:'av_kopplung', label:'Kopplung zwischen Vorhof und Kammer?', placeholder:'ja/nein/variabel; kurz begründen'},
-    {key:'st_strecke', label:'ST-Strecke: Senkung oder Hebung?', placeholder:'Ort, Ausmaß (in mm), Morphologie'}
+    {key:'qrs_rhythmik', label:'QRS-Komplexe: rhythmisch oder arrhythmisch?', placeholder:'rhythmisch oder arrhythmisch?'},
+    {key:'qrs_breite', label:'QRS-Komplexe: schmal oder breit?', type:'choice', options:['schmal','breit']},
+    {key:'vorhofaktivitaet', label:'Vorhofaktivität vorhanden?', type:'choice', options:['Ja','Nein']},
+    {key:'av_kopplung', label:'Kopplung zwischen Vorhof und Kammer?', type:'choice', options:['Ja','Nein']},
+    {key:'st_strecke', label:'ST-Streckenhebung?', type:'st'}
   ];
 }
 

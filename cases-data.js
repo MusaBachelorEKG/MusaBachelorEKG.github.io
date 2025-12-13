@@ -4,7 +4,9 @@ window.EMBEDDED_CASES = [
   {
     id: "fall_1",
     title: "EKG Fall 1",
-    intro: "Aufnahme eines Patienten mit Palpitationen. Bitte bewerte Rhythmus und Frequenz.",
+
+    intro: "Aufnahme eines Patienten mit Palpitationen.",
+
     images: ["bilder/w1_f1.png"],
     options: [
       "Sinusrhythmus ohne pathologische Auffälligkeiten",
@@ -18,7 +20,7 @@ window.EMBEDDED_CASES = [
   {
     id: "fall_2",
     title: "EKG Fall 2",
-    intro: "Patient mit Brustschmerz unter Belastung. Beurteile die ST-Strecke.",
+    intro: "Patient mit Brustschmerz unter Belastung.",
     images: ["bilder/w1_f2.png"],
     options: [
       "Normales EKG",
@@ -32,7 +34,7 @@ window.EMBEDDED_CASES = [
   {
     id: "fall_3",
     title: "EKG Fall 3",
-    intro: "Synkope unklarer Genese. Prüfe die QRS-Breite und die T-Wellen.",
+    intro: "Synkope unklarer Genese.",
     images: ["bilder/w1_f3.png"],
     options: [
       "Ventrikuläre Tachykardie",
@@ -46,7 +48,7 @@ window.EMBEDDED_CASES = [
   {
     id: "fall_4",
     title: "EKG Fall 4",
-    intro: "Dyspnoe bei bekannter Herzinsuffizienz. Beurteile Rhythmus und Leitungsverzögerung.",
+    intro: "Dyspnoe bei bekannter Herzinsuffizienz.",
     images: ["bilder/w2_f1.png"],
     options: [
       "Linksschenkelblock",
@@ -60,7 +62,7 @@ window.EMBEDDED_CASES = [
   {
     id: "fall_5",
     title: "EKG Fall 5",
-    intro: "Schwindelattacken im Alltag. Prüfe die AV-Überleitung.",
+    intro: "Schwindelattacken im Alltag.",
     images: ["bilder/w2_f2.png"],
     options: [
       "AV-Block Grad I",
