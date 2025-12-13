@@ -1,7 +1,7 @@
 # MusaBachelorEKG
 
 ## Firebase-Konfiguration
-Die Web-App-Schlüssel sind hinterlegt und können sofort verwendet werden:
+Die Web-App-Schlüssel sind hinterlegt und können sofort verwendet werden (inkl. aktivem Google Tag für Analytics):
 
 ```js
 const firebaseConfig = {

@@ -114,6 +114,11 @@
     .imgTopBar .pill{background:#0a1e3f;border:1px solid var(--line);border-radius:999px;padding:6px 10px;font-size:12px;color:var(--muted)}
     .closeBtn{position:absolute;top:12px;right:12px}
 
+    /* End-Screen Overlay */
+    #endOverlay .end-card{background:#0e2146;border:4px solid #ffffff;border-radius:18px;padding:28px;max-width:640px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.55);text-align:center}
+    #endOverlay .end-banner{background:linear-gradient(135deg, rgba(88,169,255,.16), rgba(34,197,94,.18));border:1px solid var(--accent);border-radius:14px;padding:18px 16px;font-size:20px;font-weight:800;color:var(--ink);margin-bottom:14px}
+    #endOverlay p{color:var(--muted);font-size:16px;line-height:1.6;margin:10px 0 18px 0;white-space:pre-line}
+
     /* Profil-Overlay Hintergrund bleibt dunkel, ohne Blur */
     #overlay{ background:rgba(7,10,16,.96); }
 
@@ -125,8 +130,17 @@
     .lead-grid button.active{background:var(--accent-2);color:#052e16}
     .small-note{color:var(--muted);font-size:12px;margin-top:4px}
   </style>
+  <!-- Google tag (gtag.js) für Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-G619CFWZG3"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-G619CFWZG3');
+  </script>
   <!-- Firebase: kompatible Bundles für einfache Einbindung ohne Build-Tool -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
@@ -211,6 +225,21 @@
         <button class="btn-ghost" id="zoomOut" title="Verkleinern">−</button>
         <button class="btn-ghost" id="zoomReset" title="Zurücksetzen">100%</button>
         <button class="btn-ghost" id="zoomIn" title="Vergrößern">+</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- End-Screen Overlay -->
+  <div class="overlay hidden" id="endOverlay" aria-live="polite">
+    <div class="end-card">
+      <div class="end-banner" id="endTitle">Herzlichen Dank für die Teilnahme!</div>
+      <p id="endSubtitle">Deine Daten sind erfolgreich hochgeladen worden.
+Sie können nun das Fenster schließen.
+
+Liebe Grüße
+Abed El Rahim, Musa</p>
+      <div class="actions" style="justify-content:center">
+        <button type="button" class="btn-ghost" id="endClose">Schließen</button>
       </div>
     </div>
   </div>
@@ -301,6 +330,10 @@ const els = {
   zoomOut: document.getElementById('zoomOut'),
   zoomReset: document.getElementById('zoomReset'),
   imgClose: document.getElementById('imgClose'),
+  endOverlay: document.getElementById('endOverlay'),
+  endTitle: document.getElementById('endTitle'),
+  endSubtitle: document.getElementById('endSubtitle'),
+  endClose: document.getElementById('endClose'),
 };
 
 /* ========= Firebase (online Speicherung) ========= */
@@ -321,6 +354,7 @@ const CLOUD_FUNCTION_NAME = 'MusaBachelor-EKG-Datensätze-Sequence';
 let firebaseApp = null;
 let firestoreDb = null;
 let isSyncInFlight = false;
+let firebaseAnalytics = null;
 
 function hasFirebaseConfig(cfg){
   return !!(cfg && cfg.apiKey && cfg.projectId && cfg.appId);
@@ -357,6 +391,15 @@ function ensureFirebase(){
   }
   firebaseApp = firebase.initializeApp(firebaseConfig);
   firestoreDb = firebase.firestore();
+  try{
+    if(firebase.analytics && firebaseConfig.measurementId){
+      firebaseAnalytics = firebase.analytics();
+      firebaseAnalytics.logEvent('page_view');
+      console.info('Firebase Analytics aktiviert');
+    }
+  }catch(e){
+    console.warn('Firebase Analytics konnte nicht initialisiert werden:', e);
+  }
   return firestoreDb;
 }
 
@@ -437,9 +480,13 @@ async function syncAllSubmissions(manual=false){
     renderSyncStatus();
     const reason = manual ? '' : ' (alle 5 Fälle abgegeben)';
     showBanner('Daten wurden online gespeichert'+reason+'.');
+    if(payload.allSubmitted){
+      showEndScreen('success');
+    }
   }catch(e){
     console.error('Sync fehlgeschlagen:', e);
     showBanner('Konnte Daten nicht an Firebase senden: '+(e?.message||e), 'error');
+    showEndScreen('error');
     renderSyncStatus('error');
   }finally{
     isSyncInFlight = false;
@@ -460,6 +507,30 @@ function maybeSyncAfterSubmission(){
 
 /* ========= Banner ========= */
 function showBanner(text, kind=''){ els.banner.textContent=text; els.banner.className='banner '+(kind||''); els.banner.style.display='block'; }
+
+/* ========= End-Screen Overlay ========= */
+function showEndScreen(state='success'){
+  if(!els.endOverlay) return;
+  const isSuccess = state === 'success';
+  if(els.endTitle){
+    els.endTitle.textContent = isSuccess
+      ? 'Herzlichen Dank für die Teilnahme!'
+      : 'Ups, die Übertragung war nicht erfolgreich.';
+  }
+  if(els.endSubtitle){
+    els.endSubtitle.textContent = isSuccess
+      ? 'Deine Daten sind erfolgreich hochgeladen worden.\nSie können nun das Fenster schließen.\n\nLiebe Grüße\nAbed El Rahim, Musa'
+      : 'Ups. Es konnte nicht hochgeladen werden. Überprüfen Sie Ihren Internetzugang.';
+  }
+  els.endOverlay.classList.remove('hidden');
+  lockScroll();
+}
+
+function hideEndScreen(){
+  if(!els.endOverlay) return;
+  els.endOverlay.classList.add('hidden');
+  unlockScroll();
+}
 
 /* ========= Fälle/Progress ========= */
 let allCases = [];
@@ -774,6 +845,9 @@ function loadCases(json){
 }
 
 /* ========= Event Handler ========= */
+els.endClose?.addEventListener('click', hideEndScreen);
+els.endOverlay?.addEventListener('click', e=>{ if(e.target === els.endOverlay){ hideEndScreen(); } });
+
 els.showCases.addEventListener('click',()=>{
   renderCaseList();
   updateStats();
