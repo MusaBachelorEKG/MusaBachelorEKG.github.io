@@ -252,7 +252,7 @@ Abed El Rahim, Musa</p>
       <h2>Vorzeitige Abgabe?</h2>
       <p>Sind Sie sicher, dass Sie vorzeitig abgeben wollen? Es ist wichtig für eine gute Auswertung, dass so viel wie möglich interpretiert wird.</p>
       <div class="actions" style="justify-content:flex-end">
-        <button type="button" class="btn-ghost" id="earlySyncContinue">Ja, ich möchte weiter machen</button>
+        <button type="button" class="btn-success" id="earlySyncContinue">Ja, ich möchte weiter machen</button>
         <button type="button" class="btn-danger" id="earlySyncConfirm">Ja, ich möchte vorzeitig beenden</button>
       </div>
     </div>
@@ -642,6 +642,14 @@ function hideEndScreen(){
   if(!els.endOverlay) return;
   els.endOverlay.classList.add('hidden');
   unlockScroll();
+}
+
+function closeTabFromEndScreen(){
+  hideEndScreen();
+  setTimeout(()=>{
+    window.open('', '_self');
+    window.close();
+  }, 50);
 }
 
   function clearCachesForRestart(){
@@ -1037,7 +1045,7 @@ function loadCases(json){
 }
 
 /* ========= Event Handler ========= */
-els.endClose?.addEventListener('click', hideEndScreen);
+els.endClose?.addEventListener('click', closeTabFromEndScreen);
 els.endOverlay?.addEventListener('click', e=>{ if(e.target === els.endOverlay){ hideEndScreen(); } });
 els.endRestart?.addEventListener('click', restartSession);
 els.earlySyncContinue?.addEventListener('click', ()=>{ hideEarlySyncPrompt(); showBanner('Bitte bearbeite möglichst alle 5 Fälle vor der Abgabe.', 'warn'); });
