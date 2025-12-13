@@ -18,7 +18,7 @@ const firebaseConfig = {
 Entschieden für den Live-Betrieb:
 
 1. **Ziel in Firestore**
-   - Sammlung: **`MusaBachelor-EKG-Datensätze`**
+   - Sammlung: **`MusaBachelor-EKG-Datensaetze`** (ASCII-Name, damit Firestore-Regeln ohne Fehler übernommen werden)
    - Dokument-ID: **Session UUID** (wird clientseitig pro Sitzung erzeugt und wiederverwendet)
 
 2. **Sicherheitskonzept**
@@ -34,5 +34,23 @@ Entschieden für den Live-Betrieb:
 Damit sind alle Parameter gesetzt; das Frontend erzeugt und speichert die Datensätze entsprechend dieser Vorgaben.
 
 ### Firestore-Konnektivität
-- Die App initialisiert Firebase/Firestore beim Laden und schreibt einmalig ein `__connectivity__`-Dokument in die Sammlung **MusaBachelor-EKG-Datensätze** (Felder: `lastChecked` via `serverTimestamp`, `clientSession`, `type: connectivity-check`).
+- Die App initialisiert Firebase/Firestore beim Laden und schreibt einmalig ein `__connectivity__`-Dokument in die Sammlung **MusaBachelor-EKG-Datensaetze** (Felder: `lastChecked` via `serverTimestamp`, `clientSession`, `type: connectivity-check`).
 - So erkennst du, ob die Verbindung und die Schreibrechte aktiv sind, ohne einen kompletten Upload abzuwarten.
+
+### Firestore-Regeln (Write-only ohne Auth)
+Setze in der Firebase-Konsole unter **Firestore → Regeln** folgende Policy, damit das Frontend ohne Login schreiben darf (lesen bleibt gesperrt):
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ASCII-Schreibweise verwenden (keine Umlaute/Sonderzeichen im Pfad)
+    match /MusaBachelor-EKG-Datensaetze/{document=**} {
+      allow create, update: if true;  // Schreiben erlaubt
+      allow read: if false;           // Lesen gesperrt
+    }
+  }
+}
+```
+
+Nach dem Veröffentlichen der Regeln sollte der Upload ohne "permission-denied" funktionieren.
