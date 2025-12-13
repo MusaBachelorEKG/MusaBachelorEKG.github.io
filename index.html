@@ -367,12 +367,14 @@ function clearProfile(){ localStorage.removeItem(PROFILE_KEY); }
 // ASCII-Schreibweise vermeiden Regel-Parser-Fehler in Firestore (keine Umlaute im Pfad)
 const FIREBASE_COLLECTION = 'MusaBachelor-EKG-Datensaetze';
 const SESSION_ID_KEY = 'ekgSessionUuid';
+const UPLOAD_LOCK_KEY = 'ekgUploadLocked';
 let firebaseApp = null;
 let firestoreDb = null;
 let isSyncInFlight = false;
 let firebaseAnalytics = null;
 let syncDisabled = false;
 let firestoreProbeDone = false;
+let uploadLocked = localStorage.getItem(UPLOAD_LOCK_KEY) === '1';
 
 function hasFirebaseConfig(cfg){
   return !!(cfg && cfg.apiKey && cfg.projectId && cfg.appId);
@@ -399,6 +401,13 @@ function renderSyncStatus(state){
     els.syncStatus.textContent = 'Online Sync: wird übertragen…';
     els.syncStatus.style.color = 'var(--accent)';
     els.syncStatus.style.borderColor = 'var(--accent)';
+    els.syncNow.disabled = true;
+    return;
+  }
+  if(uploadLocked){
+    els.syncStatus.textContent = 'Online Sync: nach Neustart deaktiviert';
+    els.syncStatus.style.color = 'var(--muted)';
+    els.syncStatus.style.borderColor = 'var(--line)';
     els.syncNow.disabled = true;
     return;
   }
@@ -1205,20 +1214,22 @@ function closeTabFromEndScreen(){
   }, 150);
 }
 
-  function clearCachesForRestart(){
+function clearCaches({ lockUploads = false } = {}){
+  if(lockUploads){
     uploadLocked = true;
     localStorage.setItem(UPLOAD_LOCK_KEY, '1');
     syncDisabled = true;
     els.syncNow.disabled = true;
     renderSyncStatus('disabled');
-    localStorage.removeItem(LS_KEY);
-    localStorage.removeItem(SESSION_ID_KEY);
-    clearProfile();
-    Object.keys(progress).forEach((k) => delete progress[k]);
   }
+  localStorage.removeItem(LS_KEY);
+  localStorage.removeItem(SESSION_ID_KEY);
+  clearProfile();
+  Object.keys(progress).forEach((k) => delete progress[k]);
+}
 
 function restartSession(){
-  clearCachesForRestart();
+  clearCaches({ lockUploads: true });
   showBanner('Daten wurden zurückgesetzt. Die Seite wird neu geladen.');
   setTimeout(() => {
     window.location.reload();
@@ -1692,7 +1703,25 @@ answerYesEl.addEventListener('click', ()=>handleAnswer(true));
 answerNoEl.addEventListener('click', ()=>handleAnswer(false));
 
 /* ========= Init ========= */
-window.addEventListener('DOMContentLoaded', bootstrapApp);
+let bootstrapRecoveryTried = false;
+async function safeBootstrap(){
+  try{
+    await bootstrapApp();
+  }catch(err){
+    console.error('Unbehandelter Startfehler. Lösche lokalen Cache und versuche es erneut.', err);
+    showBanner('Beim Laden ist ein Fehler aufgetreten. Lokale Daten werden zurückgesetzt.', 'error');
+    clearCaches();
+    if(!bootstrapRecoveryTried){
+      bootstrapRecoveryTried = true;
+      setTimeout(()=>safeBootstrap(), 80);
+    } else {
+      els.view.innerHTML = '<div class="small">Start fehlgeschlagen. Bitte Seite neu laden.</div>';
+      overlayEl.classList.remove('hidden');
+      lockScroll();
+    }
+  }
+}
+window.addEventListener('DOMContentLoaded', safeBootstrap);
 
 cancelOverlayEl.addEventListener('click', async ()=>{
   const prof = await loadProfile();
