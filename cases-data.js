@@ -4,7 +4,9 @@ window.EMBEDDED_CASES = [
   {
     id: "fall_1",
     title: "EKG Fall 1",
+
     intro: "Aufnahme eines Patienten mit Palpitationen.",
+
     images: ["bilder/w1_f1.png"],
     options: [
       "Sinusrhythmus ohne pathologische Auffälligkeiten",
