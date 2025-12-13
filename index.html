@@ -125,6 +125,9 @@
     .lead-grid button.active{background:var(--accent-2);color:#052e16}
     .small-note{color:var(--muted);font-size:12px;margin-top:4px}
   </style>
+  <!-- Firebase: kompatible Bundles für einfache Einbindung ohne Build-Tool -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
   <header>
@@ -140,8 +143,9 @@
       <div class="row card" style="gap:10px">
         <div class="toolbar" style="flex:1 1 auto">
           <button id="showCases" class="btn-accent">5 EKG-Fälle anzeigen</button>
-          <button id="exportEnc" class="btn-ghost">Ergebnisse exportieren (.enc)</button>
+          <button id="syncNow" class="btn-ghost">Daten online speichern</button>
         </div>
+        <span class="badge" id="syncStatus">Online Sync: nicht konfiguriert</span>
       </div>
       <div id="banner" class="banner"></div>
       <div id="diag" class="small"></div>
@@ -280,8 +284,9 @@ function clearProfile(){ localStorage.removeItem(PROFILE_KEY); }
 const els = {
   list: document.getElementById('caseList'),
   view: document.getElementById('caseView'),
-  exportEnc: document.getElementById('exportEnc'),
   showCases: document.getElementById('showCases'),
+  syncNow: document.getElementById('syncNow'),
+  syncStatus: document.getElementById('syncStatus'),
   banner: document.getElementById('banner'),
   diag: document.getElementById('diag'),
   statusBadge: document.getElementById('statusBadge'),
@@ -298,6 +303,161 @@ const els = {
   imgClose: document.getElementById('imgClose'),
 };
 
+/* ========= Firebase (online Speicherung) ========= */
+// Firebase Web-Konfiguration (bereitgestellt)
+const firebaseConfig = window.FIREBASE_CONFIG || {
+  apiKey: 'AIzaSyBi_FTaRZQDp6CK82VnvvR_B_4bi10WJDY',
+  authDomain: 'musabachelor-ekg.firebaseapp.com',
+  projectId: 'musabachelor-ekg',
+  storageBucket: 'musabachelor-ekg.firebasestorage.app',
+  messagingSenderId: '987763555706',
+  appId: '1:987763555706:web:7b7a5206c1bae20512eac3',
+  measurementId: 'G-G619CFWZG3',
+};
+const FIREBASE_COLLECTION = 'MusaBachelor-EKG-Datensätze';
+const SUBMISSION_COUNTER_KEY = 'ekgSubmissionCounter';
+const SESSION_ID_KEY = 'ekgSessionUuid';
+const CLOUD_FUNCTION_NAME = 'MusaBachelor-EKG-Datensätze-Sequence';
+let firebaseApp = null;
+let firestoreDb = null;
+let isSyncInFlight = false;
+
+function hasFirebaseConfig(cfg){
+  return !!(cfg && cfg.apiKey && cfg.projectId && cfg.appId);
+}
+
+function ensureSessionId(){
+  const existing = localStorage.getItem(SESSION_ID_KEY);
+  if(existing){ return existing; }
+  const uuid = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  localStorage.setItem(SESSION_ID_KEY, uuid);
+  return uuid;
+}
+
+function renderSyncStatus(state){
+  if(!els.syncStatus) return;
+  if(!hasFirebaseConfig(firebaseConfig)){
+    els.syncStatus.textContent = 'Online Sync: nicht konfiguriert';
+    els.syncStatus.style.color = 'var(--muted)';
+    els.syncStatus.style.borderColor = 'var(--line)';
+    return;
+  }
+  const sentAll = !!progress.__syncAllSent;
+  const isError = state === 'error';
+  els.syncStatus.textContent = sentAll ? 'Online Sync: übermittelt' : 'Online Sync: bereit';
+  els.syncStatus.style.color = isError ? 'var(--danger)' : (sentAll ? 'var(--ok)' : 'var(--ink)');
+  els.syncStatus.style.borderColor = isError ? 'var(--danger)' : 'var(--accent)';
+}
+
+function ensureFirebase(){
+  if(firestoreDb) return firestoreDb;
+  if(!hasFirebaseConfig(firebaseConfig) || !window.firebase){
+    console.warn('Firebase ist nicht konfiguriert.');
+    return null;
+  }
+  firebaseApp = firebase.initializeApp(firebaseConfig);
+  firestoreDb = firebase.firestore();
+  return firestoreDb;
+}
+
+function nextSubmissionNumber(){
+  const current = Number(localStorage.getItem(SUBMISSION_COUNTER_KEY) || '0');
+  const next = current + 1;
+  localStorage.setItem(SUBMISSION_COUNTER_KEY, String(next));
+  return next;
+}
+
+function buildSubmissionPayload(){
+  const cases = allCases.map(c=>{
+    const entry = progress[c.id] || {};
+    return {
+      id: c.id,
+      title: c.title,
+      submitted: !!entry.submitted,
+      submittedAt: entry.submittedAt || null,
+      submittedAtTs: entry.submittedAt ? firebase.firestore.Timestamp.fromDate(new Date(entry.submittedAt)) : null,
+      answers: entry.answers || {},
+    };
+  });
+  const tableRows = cases.map(row=>({
+    id: row.id,
+    title: row.title,
+    ventr_frequenz: row.answers?.ventr_frequenz ?? '',
+    qrs_rhythmik: row.answers?.qrs_rhythmik ?? '',
+    qrs_breite: row.answers?.qrs_breite ?? '',
+    vorhofaktivitaet: row.answers?.vorhofaktivitaet ?? '',
+    av_kopplung: row.answers?.av_kopplung ?? '',
+    st_strecke: formatStAnswer(row.answers?.st_strecke),
+    interpretation: row.answers?.interpretation ?? '',
+    submitted: row.submitted,
+    submittedAt: row.submittedAt,
+    submittedAtTs: row.submittedAtTs,
+  }));
+  return {
+    sessionId: ensureSessionId(),
+    createdAt: firebase.firestore.Timestamp.now(),
+    cases,
+    nestedCases: cases,
+    tableRows,
+    flatTableRows: tableRows,
+    completedCases: cases.filter(x=>x.submitted).length,
+    allSubmitted: cases.length ? cases.every(x=>x.submitted) : false,
+    screening: {...qAnswers},
+    formats: {
+      nested: 'nestedCases',
+      tabular: 'flatTableRows',
+    },
+  };
+}
+
+async function syncAllSubmissions(manual=false){
+  const db = ensureFirebase();
+  if(!db){
+    showBanner('Firebase ist nicht eingerichtet. Bitte Konfigurationsdaten eintragen.', 'warn');
+    renderSyncStatus('error');
+    return;
+  }
+  if(isSyncInFlight){ return; }
+  isSyncInFlight = true;
+  try{
+    const payload = buildSubmissionPayload();
+    const profile = await loadProfile();
+    payload.profileStatus = profile?.status || 'unknown';
+    payload.submissionNumber = nextSubmissionNumber();
+    payload.cloudFunction = CLOUD_FUNCTION_NAME;
+    payload.sessionDocId = payload.sessionId;
+    const docRef = db.collection(FIREBASE_COLLECTION).doc(payload.sessionId);
+    await docRef.set({
+      ...payload,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      clientCreatedAt: payload.createdAt,
+    });
+    progress.__syncAllSent = payload.allSubmitted;
+    saveProgress();
+    renderSyncStatus();
+    const reason = manual ? '' : ' (alle 5 Fälle abgegeben)';
+    showBanner('Daten wurden online gespeichert'+reason+'.');
+  }catch(e){
+    console.error('Sync fehlgeschlagen:', e);
+    showBanner('Konnte Daten nicht an Firebase senden: '+(e?.message||e), 'error');
+    renderSyncStatus('error');
+  }finally{
+    isSyncInFlight = false;
+  }
+}
+
+function allCasesSubmitted(){
+  return allCases.length > 0 && allCases.every(c=>progress[c.id]?.submitted);
+}
+
+function maybeSyncAfterSubmission(){
+  if(allCasesSubmitted() && !progress.__syncAllSent){
+    syncAllSubmissions();
+  } else {
+    renderSyncStatus();
+  }
+}
+
 /* ========= Banner ========= */
 function showBanner(text, kind=''){ els.banner.textContent=text; els.banner.className='banner '+(kind||''); els.banner.style.display='block'; }
 
@@ -308,6 +468,8 @@ let currentCaseId = null;
 const LS_KEY = 'ekgTrainerProgressV1';
 const progress = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
 function saveProgress(){ localStorage.setItem(LS_KEY, JSON.stringify(progress)); }
+
+renderSyncStatus();
 
 function updateStats(){
     const finished = allCases.filter(hasAnswers).length;
@@ -337,7 +499,10 @@ window.addEventListener('resize', adjustExplanationHeight);
   function renderCaseList(){
     if(allCases.length===0){ els.list.innerHTML='<div class="small">Keine Fälle.</div>'; return; }
     els.list.innerHTML = allCases.map(c=>{
-      const status = hasAnswers(c) ? `<span class="badge">bearbeitet</span>` : `<span class="badge">offen</span>`;
+      const entry = progress[c.id];
+      const status = entry?.submitted
+        ? `<span class="badge" style="background:rgba(34,197,94,.18);border-color:var(--accent-2);color:var(--ok)">abgegeben</span>`
+        : (hasAnswers(c) ? `<span class="badge">bearbeitet</span>` : `<span class="badge">offen</span>`);
       return `<button data-id="${c.id}" class="btn-ghost" style="text-align:left;width:100%"><div class="small">Fall</div><div>${c.title}</div><div class="small">${status}</div></button>`;
     }).join('');
     [...els.list.querySelectorAll('button')].forEach(b=>b.addEventListener('click',()=>openCase(b.dataset.id)));
@@ -360,6 +525,10 @@ function buildImagesHTML(c){
       const c = allCases.find(x=>x.id==id);
       if(!c){ showBanner('Interner Fehler: Fall nicht gefunden','error'); return; }
 
+      const progressEntry = progress[id] || { answers:{} };
+      const isSubmitted = !!progressEntry.submitted;
+      const dis = isSubmitted ? 'disabled' : '';
+
       const fieldsHtml = (c.fields||[]).map((f)=>{
         const pObj = progress[id]||{ answers:{} };
         if(f.fixed){
@@ -367,7 +536,6 @@ function buildImagesHTML(c){
           pObj.answers = pObj.answers || {}; pObj.answers[f.key] = val; progress[id] = pObj; saveProgress();
           return `<div><div class="small">${f.label}</div><div style="background:#0b1f41;border:1px solid var(--line);border-radius:12px;padding:10px;color:#cdd7eb">${val}</div></div>`;
         }
-        const dis = '';
         const val = pObj.answers ? pObj.answers[f.key] : '';
         if(f.type === 'choice'){
           const selected = typeof val === 'string' ? val : '';
@@ -392,9 +560,21 @@ function buildImagesHTML(c){
             : '';
           return `<div data-field-block="${f.key}" data-field-type="st"><div class="small">${f.label}</div><div class="choice-row"><button type="button" class="btn-ghost ${yesActive}" data-value="Ja" ${dis}>Ja</button><button type="button" class="btn-ghost ${noActive}" data-value="Nein" ${dis}>Nein</button></div>${leadBlock}</div>`;
         }
+        if(f.type === 'number'){
+          const numVal = typeof val === 'number' || (typeof val === 'string' && val.trim() !== '') ? val : '';
+          return `<div><div class="small">${f.label}</div><input type="number" inputmode="numeric" pattern="[0-9]*" min="${f.min ?? 0}" max="${f.max ?? 230}" ${dis} data-key="${f.key}" data-type="number" placeholder="${f.placeholder||''}" value="${numVal}"></div>`;
+        }
         const textVal = typeof val === 'string' ? val : '';
         return `<div><div class="small">${f.label}</div><textarea ${dis} data-key="${f.key}" placeholder="${f.placeholder||''}">${textVal}</textarea></div>`;
       }).join('');
+
+      const submittedInfo = progressEntry.submittedAt ? new Date(progressEntry.submittedAt).toLocaleString('de-DE') : '';
+      const submitBlock = `
+        <div class="hr"></div>
+        <div class="row" style="align-items:center;justify-content:space-between;margin-top:8px;gap:10px">
+          <div class="small">${isSubmitted ? `Abgegeben am ${submittedInfo}` : 'Klicke auf Abgabe, um die Eingaben zu sperren.'}</div>
+          <button type="button" class="btn-success" id="submitCase" ${isSubmitted ? 'disabled' : ''}>Abgabe</button>
+        </div>`;
 
       els.view.innerHTML = `
         <div class="row" style="align-items:flex-start">
@@ -413,6 +593,7 @@ function buildImagesHTML(c){
           <div>
             <div class="small">Freitext-Interpretation</div>
             ${fieldsHtml}
+            ${submitBlock}
           </div>
         </div>
       `;
@@ -424,21 +605,57 @@ function buildImagesHTML(c){
       els.explanationBox.style.display = 'none';
       els.explanationText.textContent = '';
 
-      els.view.querySelectorAll('textarea').forEach(t=>{
-        t.addEventListener('input',()=>{
-          const key = t.dataset.key;
+      els.view.querySelectorAll('[data-key]').forEach(ctrl=>{
+        ctrl.addEventListener('input',()=>{
+          if(progress[id]?.submitted){ return; }
+          const key = ctrl.dataset.key;
+          let value = ctrl.value;
+          if(ctrl.dataset.type === 'number'){
+            value = value.replace(/[^0-9]/g,'');
+            if(value === ''){
+              progress[id] = progress[id] || {answers:{}};
+              progress[id].answers[key] = '';
+              ctrl.value = '';
+              saveProgress();
+              renderCaseList();
+              updateStats();
+              return;
+            }
+            const min = Number(ctrl.getAttribute('min')) || 0;
+            const max = Number(ctrl.getAttribute('max')) || 230;
+            let num = parseInt(value, 10);
+            num = Math.min(max, Math.max(min, isNaN(num) ? min : num));
+            value = String(num);
+            ctrl.value = value;
+          }
           progress[id] = progress[id] || {answers:{}};
-          progress[id].answers[key] = t.value;
+          progress[id].answers[key] = value;
           saveProgress();
           renderCaseList();
           updateStats();
         });
       });
       bindChoiceFields(id, c);
+
+      const submitBtn = document.getElementById('submitCase');
+      if(submitBtn){
+        submitBtn.addEventListener('click', ()=>{
+          progress[id] = progress[id] || {answers:{}};
+          if(progress[id].submitted){ return; }
+          progress[id].submitted = true;
+          progress[id].submittedAt = new Date().toISOString();
+          saveProgress();
+          renderCaseList();
+          showBanner('Fall wurde abgegeben. Änderungen sind gesperrt.', '');
+          openCase(id);
+          maybeSyncAfterSubmission();
+        });
+      }
     }
 adjustExplanationHeight();
 
   function bindChoiceFields(id, c){
+    if(progress[id]?.submitted){ return; }
     document.querySelectorAll('[data-field-type="choice"]').forEach(block=>{
       const fieldKey = block.getAttribute('data-field-block');
       block.querySelectorAll('button[data-type="choice"]').forEach(btn=>{
@@ -462,6 +679,7 @@ adjustExplanationHeight();
         if(!progress[id].answers[fieldKey]){ progress[id].answers[fieldKey] = {choice:'', leads:[]}; }
       };
       const setChoice = (choice)=>{
+        if(progress[id]?.submitted){ return; }
         ensureProgress();
         const current = progress[id].answers[fieldKey];
         const leads = choice === 'Ja' ? (current.leads || []) : [];
@@ -484,6 +702,7 @@ adjustExplanationHeight();
 
     block.querySelectorAll('[data-lead]').forEach(btn=>{
       btn.addEventListener('click',()=>{
+        if(progress[id]?.submitted){ return; }
         ensureProgress();
         const entry = progress[id].answers[fieldKey];
         if(entry.choice !== 'Ja'){ return; }
@@ -522,8 +741,8 @@ adjustExplanationHeight();
 function defaultFields(){
   return [
     {key:'elektromechanik', label:'Elektrische und mechanische Aktivität vorhanden?', fixed:true, fixedValue:'Ja – 50mm/s Schreibgeschwindigkeit'},
-    {key:'ventr_frequenz', label:'Ventrikuläre Frequenz (∕min)', placeholder:'z. B. 78∕min'},
-      {key:'qrs_rhythmik', label:'QRS-Komplexe: rhythmisch oder arrhythmisch?', placeholder:'rhythmisch oder arrhythmisch?'},
+    {key:'ventr_frequenz', label:'Ventrikuläre Frequenz (∕min)', type:'number', min:0, max:230, placeholder:'0–230'},
+      {key:'qrs_rhythmik', label:'QRS-Komplexe: rhythmisch oder arrhythmisch?', type:'choice', options:['rhythmisch','arrhythmisch']},
       {key:'qrs_breite', label:'QRS-Komplexe: schmal oder breit?', type:'choice', options:['schmal','breit']},
       {key:'vorhofaktivitaet', label:'Vorhofaktivität vorhanden?', type:'choice', options:['Ja','Nein']},
       {key:'av_kopplung', label:'Kopplung zwischen Vorhof und Kammer?', type:'choice', options:['Ja','Nein']},
@@ -554,46 +773,6 @@ function loadCases(json){
   }catch(e){ showBanner('Fehler beim Laden der Fälle.','error'); }
 }
 
-/* ======= Export (.enc) – ohne Lösungstext & ohne "Abgegeben" ======= */
-function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m])); }
-function buildExportHTML(prof){
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('de-DE');
-  const timeStr = now.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
-  let html = `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>EKG Export – ${escapeHtml(prof?.name||'')}</title>
-  <style>body{font-family:Arial,sans-serif;margin:20px}h1{font-size:20px}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #999;padding:6px 10px;text-align:left}th{background:#eee}.ok{color:green;font-weight:bold}.err{color:red;font-weight:bold}</style>
-  </head><body>`;
-  html += `<h1>EKG-Auswertung</h1><p><strong>Name:</strong> ${escapeHtml(prof?.name||'')}<br><strong>Klasse:</strong> ${escapeHtml(prof?.klasse||'')}<br><strong>Exportiert am:</strong> ${dateStr}, ${timeStr}</p>`;
-    html += `<table><tr><th>Fall-ID</th><th>Titel</th><th>Frequenz</th><th>Rhythmik</th><th>QRS-Breite</th><th>Vorhofaktivität</th><th>AV-Kopplung</th><th>ST-Strecke</th><th>Zusammenfassende Interpretation</th></tr>`;
-    allCases.forEach(c=>{
-      if(!hasAnswers(c)) return;
-      const ans = (progress[c.id]?.answers)||{};
-      html += `<tr><td>${escapeHtml(c.id)}</td><td>${escapeHtml(c.title)}</td>
-      <td>${escapeHtml(ans.ventr_frequenz)}</td><td>${escapeHtml(ans.qrs_rhythmik)}</td><td>${escapeHtml(ans.qrs_breite)}</td><td>${escapeHtml(ans.vorhofaktivitaet)}</td><td>${escapeHtml(ans.av_kopplung)}</td><td>${escapeHtml(formatStAnswer(ans.st_strecke))}</td><td>${escapeHtml(ans.interpretation)}</td></tr>`;
-    });
-  html += `</table></body></html>`;
-  return html;
-}
-
-async function exportEncryptedHTML(){
-  const prof = await loadProfile();
-  const plainHtml = buildExportHTML(prof);
-  const pass = "ekg-export-pass";
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const keyMat = await crypto.subtle.importKey('raw', strToBytes(pass), 'PBKDF2', false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:120000, hash:'SHA-256'}, keyMat, {name:'AES-GCM', length:256}, false, ['encrypt']);
-  const cipherBuf = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, strToBytes(plainHtml));
-  const payload = { ver:'1', alg:'AES-GCM', kdf:'PBKDF2', iter:120000, salt:bytesToB64(salt), iv:bytesToB64(iv), ct:bytesToB64(new Uint8Array(cipherBuf)) };
-  const blob = new Blob([JSON.stringify(payload)], {type:'application/octet-stream'});
-  const name = (prof?.name||'Schueler').replace(/\s+/g,'');
-  const iso = new Date().toISOString().slice(0,16).replace(/:/g,'-');
-  const fileName = `EKG_${name}_${iso}.enc`;
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download=fileName; a.click(); URL.revokeObjectURL(url);
-  showBanner('Export erstellt. Datei wurde verschlüsselt und heruntergeladen.');
-}
-
 /* ========= Event Handler ========= */
 els.showCases.addEventListener('click',()=>{
   renderCaseList();
@@ -602,7 +781,7 @@ els.showCases.addEventListener('click',()=>{
   else if(allCases[0]){ openCase(allCases[0].id); }
   document.getElementById('caseList').scrollIntoView({behavior:'smooth'});
 });
-els.exportEnc.addEventListener('click', exportEncryptedHTML);
+els.syncNow.addEventListener('click', ()=> syncAllSubmissions(true));
 
 /* Screening-Overlay */
 const overlayEl = document.getElementById('overlay');
