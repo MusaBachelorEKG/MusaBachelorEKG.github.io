@@ -1,10 +1,9 @@
 // Integrierte Falldaten (statt Upload)
-// Struktur entspricht den bisher hochgeladenen JSON-Dateien.
+// Fünf feste EKG-Fälle ohne Wochenaufteilung
 window.EMBEDDED_CASES = [
   {
-    id: "w1_f1",
-    week: 1,
-    title: "Woche 1 – Fall 1",
+    id: "fall_1",
+    title: "EKG Fall 1",
     intro: "Aufnahme eines Patienten mit Palpitationen. Bitte bewerte Rhythmus und Frequenz.",
     images: ["bilder/w1_f1.png"],
     options: [
@@ -17,9 +16,8 @@ window.EMBEDDED_CASES = [
     solution: "Unregelmäßige RR-Abstände und fehlende P-Wellen sprechen für Vorhofflimmern.",
   },
   {
-    id: "w1_f2",
-    week: 1,
-    title: "Woche 1 – Fall 2",
+    id: "fall_2",
+    title: "EKG Fall 2",
     intro: "Patient mit Brustschmerz unter Belastung. Beurteile die ST-Strecke.",
     images: ["bilder/w1_f2.png"],
     options: [
@@ -32,9 +30,8 @@ window.EMBEDDED_CASES = [
     solution: "Deutliche ST-Hebungen in den anterolateralen Ableitungen.",
   },
   {
-    id: "w1_f3",
-    week: 1,
-    title: "Woche 1 – Fall 3",
+    id: "fall_3",
+    title: "EKG Fall 3",
     intro: "Synkope unklarer Genese. Prüfe die QRS-Breite und die T-Wellen.",
     images: ["bilder/w1_f3.png"],
     options: [
@@ -47,9 +44,8 @@ window.EMBEDDED_CASES = [
     solution: "Breite QRS-Komplexe mit Monomorphie sprechen für eine ventrikuläre Tachykardie.",
   },
   {
-    id: "w2_f1",
-    week: 2,
-    title: "Woche 2 – Fall 1",
+    id: "fall_4",
+    title: "EKG Fall 4",
     intro: "Dyspnoe bei bekannter Herzinsuffizienz. Beurteile Rhythmus und Leitungsverzögerung.",
     images: ["bilder/w2_f1.png"],
     options: [
@@ -62,9 +58,8 @@ window.EMBEDDED_CASES = [
     solution: "Rsr'-Muster in V1/V2 mit verbreitertem QRS deutet auf einen Rechtsschenkelblock.",
   },
   {
-    id: "w2_f2",
-    week: 2,
-    title: "Woche 2 – Fall 2",
+    id: "fall_5",
+    title: "EKG Fall 5",
     intro: "Schwindelattacken im Alltag. Prüfe die AV-Überleitung.",
     images: ["bilder/w2_f2.png"],
     options: [
@@ -75,65 +70,5 @@ window.EMBEDDED_CASES = [
     ],
     correct: "B",
     solution: "Progressive PQ-Verlängerung mit anschließender Dropped Beat: Mobitz Typ I.",
-  },
-  {
-    id: "w2_f3",
-    week: 2,
-    title: "Woche 2 – Fall 3",
-    intro: "Thorakales Druckgefühl. Fokus auf ST-Strecke und T-Wellen.",
-    images: ["bilder/w2_f3.png"],
-    options: [
-      "Perikarditis",
-      "Posteriorer Infarkt",
-      "Frühe Repolarisation",
-      "Hyperkaliämie",
-    ],
-    correct: "A",
-    solution: "Diffuse ST-Hebungen ohne Spiegelbilder sind typisch für eine Perikarditis.",
-  },
-  {
-    id: "w3_f1",
-    week: 3,
-    title: "Woche 3 – Fall 1",
-    intro: "Patient mit Palpitationen im Dienst. Prüfe P-Wellen und AV-Verhältnis.",
-    images: ["bilder/w3_f1.png"],
-    options: [
-      "Vorhofflattern mit 2:1-Überleitung",
-      "Vorhofflimmern",
-      "Sinustachykardie",
-      "Junktionaler Rhythmus",
-    ],
-    correct: "A",
-    solution: "Sägezahnmuster in II/III/aVF und regelmäßige 2:1-Überleitung sprechen für Vorhofflattern.",
-  },
-  {
-    id: "w3_f2",
-    week: 3,
-    title: "Woche 3 – Fall 2",
-    intro: "Unklarer Brustschmerz. Achte auf ST-Hebungen und PR-Senkungen.",
-    images: ["bilder/w3_f2.png"],
-    options: [
-      "Akuter STEMI inferolateral",
-      "Prinzmetal-Angina",
-      "Perikarditis",
-      "Hyperkaliämie",
-    ],
-    correct: "C",
-    solution: "Diffuse ST-Hebungen und PR-Senkung sprechen für Perikarditis.",
-  },
-  {
-    id: "w3_f3",
-    week: 3,
-    title: "Woche 3 – Fall 3",
-    intro: "Belastungsabhängiger Brustschmerz. Prüfe auf Ischämiezeichen.",
-    images: ["bilder/w3_f3.png"],
-    options: [
-      "NSTEMI mit ST-Senkungen",
-      "Hypertrophe Kardiomyopathie",
-      "Digitaliseffekt",
-      "Normales EKG",
-    ],
-    correct: "A",
-    solution: "Horizontale ST-Senkungen in mehreren Ableitungen sprechen für eine belastungsinduzierte Ischämie.",
-  },
+  }
 ];

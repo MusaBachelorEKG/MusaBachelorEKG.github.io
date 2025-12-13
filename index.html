@@ -131,7 +131,7 @@
       <div class="spacer"></div>
       <div class="row card" style="gap:10px">
         <div class="toolbar" style="flex:1 1 auto">
-          <select id="weekSelect"><option value="">Woche wählen…</option></select>
+          <button id="showCases" class="btn-accent">5 EKG-Fälle anzeigen</button>
           <button id="exportEnc" class="btn-ghost">Ergebnisse exportieren (.enc)</button>
           <button id="resetProgress" class="btn-danger">Fortschritt löschen</button>
         </div>
@@ -144,7 +144,7 @@
   <main class="wrap">
     <div class="grid">
       <aside class="card">
-        <div class="small">Fälle in dieser Woche</div>
+        <div class="small">EKG-Fälle</div>
         <div id="caseList" class="grid-1"></div>
         <div id="explanationBox">
           <div class="title">Warum richtig?</div>
@@ -153,7 +153,7 @@
       </aside>
       <section class="card">
         <div id="caseView">
-          <div class="small">Fälle sind bereits geladen. Wähle eine <b>Woche</b>, um zu starten.</div>
+          <div class="small">Fälle sind bereits geladen. Wähle einen <b>Fall</b>, um zu starten.</div>
         </div>
       </section>
     </div>
@@ -271,11 +271,11 @@ function clearProfile(){ localStorage.removeItem(PROFILE_KEY); }
 
 /* ========= Elemente ========= */
 const els = {
-  week: document.getElementById('weekSelect'),
   list: document.getElementById('caseList'),
   view: document.getElementById('caseView'),
   exportEnc: document.getElementById('exportEnc'),
   reset: document.getElementById('resetProgress'),
+  showCases: document.getElementById('showCases'),
   banner: document.getElementById('banner'),
   diag: document.getElementById('diag'),
   statusBadge: document.getElementById('statusBadge'),
@@ -295,37 +295,24 @@ const els = {
 /* ========= Banner ========= */
 function showBanner(text, kind=''){ els.banner.textContent=text; els.banner.className='banner '+(kind||''); els.banner.style.display='block'; }
 
-/* ========= Week/Case/Progress ========= */
+/* ========= Fälle/Progress ========= */
 let allCases = [];
-let currentWeek = null;
 let currentCaseId = null;
 
 const LS_KEY = 'ekgTrainerProgressV1';
 const progress = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
 function saveProgress(){ localStorage.setItem(LS_KEY, JSON.stringify(progress)); }
 
-function setWeeksOptions(){
-  const weeksSet = new Set(allCases.map(c=>Number(c.week||1)));
-  const weeks = Array.from(weeksSet).sort((a,b)=>a-b);
-  const currentVal = els.week.value || "";
-  const options = ['<option value="">Woche wählen…</option>'] ;
-  for(const w of weeks){
-    const casesInW = allCases.filter(c=>Number(c.week)===Number(w));
-    const allDone = casesInW.length>0 && casesInW.every(c => (progress[c.id]?.checked) === true);
-    const label = allDone ? `Woche ${w} ✔️` : `Woche ${w}`;
-    options.push(`<option value="${w}">${label}</option>`);
-  }
-  els.week.innerHTML = options.join('');
-  if(currentVal) els.week.value = currentVal;
-  els.diag.innerHTML = `Geladen: <b>${allCases.length}</b> Fälle · Wochen: <b>${weeks.join(', ')||'–'}</b>`;
+function updateStats(){
+  const finished = allCases.filter(c=>progress[c.id]?.checked).length;
+  els.diag.innerHTML = `Geladen: <b>${allCases.length}</b> Fälle · Abgegeben: <b>${finished}</b>`;
 }
 function adjustExplanationHeight(){ const box=document.getElementById('explanationBox'); if(box){ box.style.maxHeight='none'; } }
 window.addEventListener('resize', adjustExplanationHeight);
 
 function renderCaseList(){
-  const inWeek = allCases.filter(c=>Number(c.week)==Number(currentWeek));
-  if(inWeek.length===0){ els.list.innerHTML='<div class="small">Keine Fälle.</div>'; return; }
-  els.list.innerHTML = inWeek.map(c=>{
+  if(allCases.length===0){ els.list.innerHTML='<div class="small">Keine Fälle.</div>'; return; }
+  els.list.innerHTML = allCases.map(c=>{
     const p = progress[c.id]||{};
     const status = p.checked ? `<span class="badge">abgegeben</span>` : `<span class="badge">offen</span>`;
     return `<button data-id="${c.id}" class="btn-ghost" style="text-align:left;width:100%"><div class="small">Fall</div><div>${c.title}</div><div class="small">${status}</div></button>`;
@@ -475,7 +462,7 @@ function openCase(id){
         progress[id].lastOk = ok;
         saveProgress();
         renderCaseList();
-        setWeeksOptions();
+        updateStats();
         openCase(id);
       });}
     }
@@ -489,7 +476,7 @@ function openCase(id){
         progress[id] = { answers:{}, choice:null, checked:false, locked:false, attempts, lastOk:null };
         saveProgress();
         renderCaseList();
-        setWeeksOptions();
+        updateStats();
         openCase(id);
         showBanner('Fall zurückgesetzt. Du kannst neu beginnen.');
       }
@@ -497,13 +484,6 @@ function openCase(id){
   }
 }
 adjustExplanationHeight();
-
-function selectWeek(w){
-  currentWeek = w;
-  renderCaseList();
-  const first = allCases.find(c=>Number(c.week)==Number(w));
-  if(first) openCase(first.id); else els.view.innerHTML='<div class="small">Keine Fälle für diese Woche.</div>';
-}
 
 function defaultFields(){
   return [
@@ -522,7 +502,6 @@ function loadCases(json){
     if(!Array.isArray(json)){ showBanner('JSON muss ein Array sein.','error'); return; }
     const mapped = json.map((c,i)=>({
       id: c.id ?? (`case_${Date.now()}_${i}`),
-      week: Number(c.week ?? 1),
       title: c.title ?? `EKG Fall ${i+1}`,
       intro: c.intro ?? '',
       // NEU: Mehrbild-Unterstützung (images-Array) + Fallback auf image-String
@@ -534,10 +513,10 @@ function loadCases(json){
       solution: c.solution ?? ''
     }));
     allCases = mapped;
-    setWeeksOptions();
-    els.week.value='';
-    els.list.innerHTML='';
-    els.view.innerHTML='<div class="small">Woche auswählen, um zu starten.</div>';
+    renderCaseList();
+    updateStats();
+    const first = allCases[0];
+    if(first){ openCase(first.id); }
     els.explanationBox.style.display = 'none';
     els.explanationText.textContent = '';
   }catch(e){ showBanner('Fehler beim Laden der Fälle.','error'); }
@@ -553,14 +532,14 @@ function buildExportHTML(prof){
   <style>body{font-family:Arial,sans-serif;margin:20px}h1{font-size:20px}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #999;padding:6px 10px;text-align:left}th{background:#eee}.ok{color:green;font-weight:bold}.err{color:red;font-weight:bold}</style>
   </head><body>`;
   html += `<h1>EKG-Auswertung</h1><p><strong>Name:</strong> ${escapeHtml(prof?.name||'')}<br><strong>Klasse:</strong> ${escapeHtml(prof?.klasse||'')}<br><strong>Exportiert am:</strong> ${dateStr}, ${timeStr}</p>`;
-  html += `<table><tr><th>Fall-ID</th><th>Woche</th><th>Titel</th><th>Frequenz</th><th>Rhythmik</th><th>QRS-Breite</th><th>Vorhofaktivität</th><th>AV-Kopplung</th><th>ST-Strecke</th><th>Schüler-MC</th><th>Richtig/Falsch</th><th>Korrekte Lösung</th><th>Versuche</th></tr>`;
+  html += `<table><tr><th>Fall-ID</th><th>Titel</th><th>Frequenz</th><th>Rhythmik</th><th>QRS-Breite</th><th>Vorhofaktivität</th><th>AV-Kopplung</th><th>ST-Strecke</th><th>Schüler-MC</th><th>Richtig/Falsch</th><th>Korrekte Lösung</th><th>Versuche</th></tr>`;
   allCases.forEach(c=>{
     const p = progress[c.id]||{};
     if(!p.checked) return;
     const ans = p.answers||{};
     const choice = p.choice||'';
     const ok = choice === (c.correct||'A');
-    html += `<tr><td>${escapeHtml(c.id)}</td><td>${escapeHtml(c.week)}</td><td>${escapeHtml(c.title)}</td>
+    html += `<tr><td>${escapeHtml(c.id)}</td><td>${escapeHtml(c.title)}</td>
     <td>${escapeHtml(ans.ventr_frequenz)}</td><td>${escapeHtml(ans.qrs_rhythmik)}</td><td>${escapeHtml(ans.qrs_breite)}</td><td>${escapeHtml(ans.vorhofaktivitaet)}</td><td>${escapeHtml(ans.av_kopplung)}</td><td>${escapeHtml(ans.st_strecke)}</td>
     <td>${escapeHtml(choice)}</td><td class="${ok?'ok':'err'}">${ok?'Richtig':'Falsch'}</td><td>${escapeHtml(c.correct)}</td><td>${escapeHtml(p.attempts||1)}</td></tr>`;
   });
@@ -588,7 +567,13 @@ async function exportEncryptedHTML(){
 }
 
 /* ========= Event Handler ========= */
-els.week.addEventListener('change',()=>{ if(els.week.value) selectWeek(Number(els.week.value)); adjustExplanationHeight(); });
+els.showCases.addEventListener('click',()=>{
+  renderCaseList();
+  updateStats();
+  if(currentCaseId){ openCase(currentCaseId); }
+  else if(allCases[0]){ openCase(allCases[0].id); }
+  document.getElementById('caseList').scrollIntoView({behavior:'smooth'});
+});
 els.exportEnc.addEventListener('click', exportEncryptedHTML);
 els.reset.addEventListener('click',()=>{
   if(confirm('Fortschritt wirklich löschen?')){
@@ -596,7 +581,7 @@ els.reset.addEventListener('click',()=>{
     saveProgress();
     if(currentCaseId) openCase(currentCaseId);
     renderCaseList();
-    setWeeksOptions();
+    updateStats();
     els.explanationBox.style.display = 'none';
     els.explanationText.textContent = '';
     showBanner('Fortschritt gelöscht.');
