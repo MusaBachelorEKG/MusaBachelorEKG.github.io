@@ -310,34 +310,39 @@ const progress = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
 function saveProgress(){ localStorage.setItem(LS_KEY, JSON.stringify(progress)); }
 
 function updateStats(){
-  const finished = allCases.filter(c=>progress[c.id]?.checked).length;
-  els.diag.innerHTML = `Geladen: <b>${allCases.length}</b> Fälle · Abgegeben: <b>${finished}</b>`;
-}
+    const finished = allCases.filter(hasAnswers).length;
+    els.diag.innerHTML = `Geladen: <b>${allCases.length}</b> Fälle · Bearbeitet: <b>${finished}</b>`;
+  }
 function adjustExplanationHeight(){ const box=document.getElementById('explanationBox'); if(box){ box.style.maxHeight='none'; } }
 window.addEventListener('resize', adjustExplanationHeight);
 
-function isFieldFilled(f, answers={}){
-  if(f.fixed) return true;
-  const val = answers[f.key];
+  function isFieldFilled(f, answers={}){
+    if(f.fixed) return true;
+    const val = answers[f.key];
   if(f.type === 'choice'){
     return typeof val === 'string' && val.trim().length>0;
   }
   if(f.type === 'st'){
     return !!(val && val.choice && (val.choice === 'Nein' || (Array.isArray(val.leads) && val.leads.length>0)));
+    }
+    return typeof val === 'string' && val.trim().length>0;
   }
-  return typeof val === 'string' && val.trim().length>0;
-}
 
-function renderCaseList(){
-  if(allCases.length===0){ els.list.innerHTML='<div class="small">Keine Fälle.</div>'; return; }
-  els.list.innerHTML = allCases.map(c=>{
-    const p = progress[c.id]||{};
-    const status = p.checked ? `<span class="badge">abgegeben</span>` : `<span class="badge">offen</span>`;
-    return `<button data-id="${c.id}" class="btn-ghost" style="text-align:left;width:100%"><div class="small">Fall</div><div>${c.title}</div><div class="small">${status}</div></button>`;
-  }).join('');
-  [...els.list.querySelectorAll('button')].forEach(b=>b.addEventListener('click',()=>openCase(b.dataset.id)));
-  adjustExplanationHeight();
-}
+  function hasAnswers(c){
+    const answers = progress[c.id]?.answers || {};
+    const fields = c.fields && c.fields.length ? c.fields : defaultFields();
+    return fields.some(f=>!f.fixed && isFieldFilled(f, answers));
+  }
+
+  function renderCaseList(){
+    if(allCases.length===0){ els.list.innerHTML='<div class="small">Keine Fälle.</div>'; return; }
+    els.list.innerHTML = allCases.map(c=>{
+      const status = hasAnswers(c) ? `<span class="badge">bearbeitet</span>` : `<span class="badge">offen</span>`;
+      return `<button data-id="${c.id}" class="btn-ghost" style="text-align:left;width:100%"><div class="small">Fall</div><div>${c.title}</div><div class="small">${status}</div></button>`;
+    }).join('');
+    [...els.list.querySelectorAll('button')].forEach(b=>b.addEventListener('click',()=>openCase(b.dataset.id)));
+    adjustExplanationHeight();
+  }
 
 function buildImagesHTML(c){
   // Unterstützt neues Feld "images" (Array) und altes Feld "image" (String)
@@ -350,235 +355,132 @@ function buildImagesHTML(c){
   return '<span class="muted">(Kein Bild angegeben)</span>';
 }
 
-function openCase(id){
-  currentCaseId = id;
-  const c = allCases.find(x=>x.id==id);
-  if(!c){ showBanner('Interner Fehler: Fall nicht gefunden','error'); return; }
-  const p = progress[id]||{ answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null };
-  const isLocked = !!p.locked;
-  const showSolution = p.checked && p.lastOk === true;
-  const showRestart = isLocked && p.lastOk === false;
+    function openCase(id){
+      currentCaseId = id;
+      const c = allCases.find(x=>x.id==id);
+      if(!c){ showBanner('Interner Fehler: Fall nicht gefunden','error'); return; }
 
-  const fieldsHtml = (c.fields||[]).map((f)=>{
-    const pObj = progress[id]||{ answers:{} };
-    if(f.fixed){
-      const val = f.fixedValue ?? '';
-      pObj.answers = pObj.answers || {}; pObj.answers[f.key] = val; progress[id] = pObj; saveProgress();
-      return `<div><div class="small">${f.label}</div><div style="background:#0b1f41;border:1px solid var(--line);border-radius:12px;padding:10px;color:#cdd7eb">${val}</div></div>`;
-    }
-    const dis = isLocked ? 'disabled' : '';
-    const val = pObj.answers ? pObj.answers[f.key] : '';
-    if(f.type === 'choice'){
-      const selected = typeof val === 'string' ? val : '';
-      const buttons = (f.options||[]).map(opt=>{
-        const active = selected === opt ? 'active' : '';
-        return `<button type="button" class="btn-ghost ${active}" data-type="choice" data-field="${f.key}" data-value="${opt}" ${dis}>${opt}</button>`;
+      const fieldsHtml = (c.fields||[]).map((f)=>{
+        const pObj = progress[id]||{ answers:{} };
+        if(f.fixed){
+          const val = f.fixedValue ?? '';
+          pObj.answers = pObj.answers || {}; pObj.answers[f.key] = val; progress[id] = pObj; saveProgress();
+          return `<div><div class="small">${f.label}</div><div style="background:#0b1f41;border:1px solid var(--line);border-radius:12px;padding:10px;color:#cdd7eb">${val}</div></div>`;
+        }
+        const dis = '';
+        const val = pObj.answers ? pObj.answers[f.key] : '';
+        if(f.type === 'choice'){
+          const selected = typeof val === 'string' ? val : '';
+          const buttons = (f.options||[]).map(opt=>{
+            const active = selected === opt ? 'active' : '';
+            return `<button type="button" class="btn-ghost ${active}" data-type="choice" data-field="${f.key}" data-value="${opt}" ${dis}>${opt}</button>`;
+          }).join('');
+          return `<div data-field-block="${f.key}" data-field-type="choice"><div class="small">${f.label}</div><div class="choice-row">${buttons}</div></div>`;
+        }
+        if(f.type === 'st'){
+          const valueObj = (val && typeof val === 'object') ? val : {choice:'', leads:[]};
+          const yesActive = valueObj.choice === 'Ja' ? 'active' : '';
+          const noActive = valueObj.choice === 'Nein' ? 'active' : '';
+          const leads = ['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6'];
+          const leadButtons = leads.map(ld=>{
+            const active = valueObj.leads?.includes(ld) ? 'active' : '';
+            return `<button type="button" class="btn-ghost ${active}" data-lead="${ld}" ${dis}>${ld}</button>`;
+          }).join('');
+          const leadInfo = valueObj.leads?.length ? `Ausgewählt: ${valueObj.leads.join(', ')}` : 'Bitte wähle mindestens eine Ableitung.';
+          const leadBlock = valueObj.choice === 'Ja'
+            ? `<div class="lead-grid">${leadButtons}</div><div class="small-note">${leadInfo}</div>`
+            : '';
+          return `<div data-field-block="${f.key}" data-field-type="st"><div class="small">${f.label}</div><div class="choice-row"><button type="button" class="btn-ghost ${yesActive}" data-value="Ja" ${dis}>Ja</button><button type="button" class="btn-ghost ${noActive}" data-value="Nein" ${dis}>Nein</button></div>${leadBlock}</div>`;
+        }
+        const textVal = typeof val === 'string' ? val : '';
+        return `<div><div class="small">${f.label}</div><textarea ${dis} data-key="${f.key}" placeholder="${f.placeholder||''}">${textVal}</textarea></div>`;
       }).join('');
-      return `<div data-field-block="${f.key}" data-field-type="choice"><div class="small">${f.label}</div><div class="choice-row">${buttons}</div></div>`;
-    }
-    if(f.type === 'st'){
-      const valueObj = (val && typeof val === 'object') ? val : {choice:'', leads:[]};
-      const yesActive = valueObj.choice === 'Ja' ? 'active' : '';
-      const noActive = valueObj.choice === 'Nein' ? 'active' : '';
-      const leads = ['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6'];
-      const leadButtons = leads.map(ld=>{
-        const active = valueObj.leads?.includes(ld) ? 'active' : '';
-        return `<button type="button" class="btn-ghost ${active}" data-lead="${ld}" ${dis}>${ld}</button>`;
-      }).join('');
-      const leadInfo = valueObj.leads?.length ? `Ausgewählt: ${valueObj.leads.join(', ')}` : 'Bitte wähle mindestens eine Ableitung.';
-      const leadBlock = valueObj.choice === 'Ja'
-        ? `<div class="lead-grid">${leadButtons}</div><div class="small-note">${leadInfo}</div>`
-        : '';
-      return `<div data-field-block="${f.key}" data-field-type="st"><div class="small">${f.label}</div><div class="choice-row"><button type="button" class="btn-ghost ${yesActive}" data-value="Ja" ${dis}>Ja</button><button type="button" class="btn-ghost ${noActive}" data-value="Nein" ${dis}>Nein</button></div>${leadBlock}</div>`;
-    }
-    const textVal = typeof val === 'string' ? val : '';
-    return `<div><div class="small">${f.label}</div><textarea ${dis} data-key="${f.key}" placeholder="${f.placeholder||''}">${textVal}</textarea></div>`;
-  }).join('');
 
-  const readyForMC = (c.fields||[]).filter(f=>!f.fixed).every(f=>isFieldFilled(f, p.answers||{}));
-  const options = Array.isArray(c.options) ? c.options : [];
-  const optionsHtml = options.map((opt,idx)=>{
-    const letter = String.fromCharCode(65+idx);
-    const checked = p.choice===letter ? 'checked' : '';
-    const dis = isLocked ? 'disabled' : '';
-    return `<label><input type="radio" name="mc" value="${letter}" ${checked} ${dis}> ${letter}) ${opt}</label>`;
-  }).join('');
-
-  const correctIndex = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.indexOf(c.correct||'A');
-  const correctText = (options[correctIndex]||'');
-
-  els.view.innerHTML = `
-    <div class="row" style="align-items:flex-start">
-      <div>
-        <div style="font-size:20px;font-weight:800">${c.title||''}</div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <span class="badge">Versuche: <b id="attemptCount">${p.attempts||0}</b></span>
-      </div>
-    </div>
-    <div class="hr"></div>
-    <div class="grid" style="grid-template-columns:1fr 1fr; gap:16px">
-      <div>
-        <div class="small">Einleitung</div>
-        <div class="introText">${c.intro||''}</div>
-        <div class="spacer"></div>
-        <div class="imgbox">${buildImagesHTML(c)}</div>
-      </div>
-      <div>
-        <div class="small">Freitext-Interpretation</div>
-        ${fieldsHtml}
-        <div class="mc ${readyForMC?'show':''}" id="mc">
-          <div class="small">Zusammenfassende Interpretation (Option wählen)</div>
-          ${optionsHtml}
-          <div class="spacer"></div>
-          <button class="btn-accent" id="checkBtn" ${isLocked?'disabled':''}>Abgeben & prüfen</button>
-          <button id="clearChoice" class="btn-ghost" ${isLocked?'disabled':''}>Auswahl löschen</button>
-          <div id="resultBox" class="small" style="margin-top:8px"></div>
-          ${ showSolution ? `
-            <div class="spacer"></div>
-            <div class="small">
-              <span class="muted">Lösung:</span> <b>${c.correct||'?'}</b> – ${correctText}<br>
-              <span class="muted">${c.solution||''}</span>
-            </div>` : '' }
-          ${ showRestart ? `
-            <div class="spacer"></div>
-            <button id="restartCase" class="btn-success">Neu starten</button>
-          ` : '' }
+      els.view.innerHTML = `
+        <div class="row" style="align-items:flex-start">
+          <div>
+            <div style="font-size:20px;font-weight:800">${c.title||''}</div>
+          </div>
         </div>
-      </div>
-    </div>
-  `;
+        <div class="hr"></div>
+        <div class="grid" style="grid-template-columns:1fr 1fr; gap:16px">
+          <div>
+            <div class="small">Einleitung</div>
+            <div class="introText">${c.intro||''}</div>
+            <div class="spacer"></div>
+            <div class="imgbox">${buildImagesHTML(c)}</div>
+          </div>
+          <div>
+            <div class="small">Freitext-Interpretation</div>
+            ${fieldsHtml}
+          </div>
+        </div>
+      `;
 
-  // === Bild-Click: alle Bilder anklickbar machen ===
-  const imgEls = els.view.querySelectorAll('.imgbox img');
-  imgEls.forEach(img => img.addEventListener('click', ()=> openImgViewer(img.src)));
+      // === Bild-Click: alle Bilder anklickbar machen ===
+      const imgEls = els.view.querySelectorAll('.imgbox img');
+      imgEls.forEach(img => img.addEventListener('click', ()=> openImgViewer(img.src)));
 
-  const resultBox = document.getElementById('resultBox');
-  const showExplain = (ok, text) => {
-    if(ok && text && String(text).trim().length>0){
-      els.explanationText.textContent = text;
-      els.explanationBox.style.display = 'block';
-    } else {
       els.explanationBox.style.display = 'none';
       els.explanationText.textContent = '';
-    }
-  };
 
-  if(p.checked){
-    resultBox.innerHTML = p.lastOk ? '<span class="ok">✔️ Richtig!</span>' : '<span class="err">✖️ Falsch.</span>';
-    showExplain(p.lastOk, c.solution||'');
-  } else {
-    resultBox.innerHTML = '';
-    showExplain(false, '');
-  }
-
-  if(!isLocked){
-    els.view.querySelectorAll('textarea').forEach(t=>{
-      t.addEventListener('input',()=>{
-        const key = t.dataset.key;
-        progress[id] = progress[id] || {answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null};
-        progress[id].answers[key] = t.value;
-        saveProgress();
-        const ready = (c.fields||[]).filter(f=>!f.fixed).every(f=>isFieldFilled(f, progress[id].answers));
-        const mcEl = document.getElementById('mc');
-        if(mcEl){ mcEl.classList.toggle('show', ready); }
-      });
-    });
-    bindChoiceFields(id, c, isLocked);
-  }
-
-  const mcEl = document.getElementById('mc');
-  if(mcEl){
-    if(!isLocked){
-      mcEl.querySelectorAll('input[name="mc"]').forEach(r=>{
-        r.addEventListener('change',()=>{
-          progress[id] = progress[id] || {answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null};
-          progress[id].choice = r.value; saveProgress();
+      els.view.querySelectorAll('textarea').forEach(t=>{
+        t.addEventListener('input',()=>{
+          const key = t.dataset.key;
+          progress[id] = progress[id] || {answers:{}};
+          progress[id].answers[key] = t.value;
+          saveProgress();
+          renderCaseList();
+          updateStats();
         });
       });
-      const clearBtn = mcEl.querySelector('#clearChoice');
-      if(clearBtn){ clearBtn.addEventListener('click',()=>{ delete progress[id]?.choice; saveProgress(); openCase(id); }); }
-      const checkBtn = mcEl.querySelector('#checkBtn');
-      if(checkBtn){ checkBtn.addEventListener('click',()=>{
-        const choice = progress[id]?.choice;
-        const rb = document.getElementById('resultBox');
-        if(!choice){ rb.innerHTML = '<span class="err">Bitte zuerst eine Option wählen.</span>'; return; }
-        const ok = choice === (c.correct||'A');
-        progress[id].attempts = (progress[id].attempts||0) + 1;
-        progress[id].checked = true;
-        progress[id].locked = true;
-        progress[id].lastOk = ok;
-        saveProgress();
-        renderCaseList();
-        updateStats();
-        openCase(id);
-      });}
+      bindChoiceFields(id, c);
     }
-  }
-
-  const restartBtn = document.getElementById('restartCase');
-  if(restartBtn){
-    restartBtn.addEventListener('click', ()=>{
-      if(confirm('Diesen Fall wirklich neu starten? Alle Eingaben werden gelöscht.')){
-        const attempts = (progress[id]?.attempts)||0;
-        progress[id] = { answers:{}, choice:null, checked:false, locked:false, attempts, lastOk:null };
-        saveProgress();
-        renderCaseList();
-        updateStats();
-        openCase(id);
-        showBanner('Fall zurückgesetzt. Du kannst neu beginnen.');
-      }
-    });
-  }
-}
 adjustExplanationHeight();
 
-function bindChoiceFields(id, c){
-  const updateMCReady = () => {
-    const answers = progress[id]?.answers || {};
-    const ready = (c.fields||[]).filter(f=>!f.fixed).every(f=>isFieldFilled(f, answers));
-    const mcEl = document.getElementById('mc');
-    if(mcEl){ mcEl.classList.toggle('show', ready); }
-  };
-
-  document.querySelectorAll('[data-field-type="choice"]').forEach(block=>{
-    const fieldKey = block.getAttribute('data-field-block');
-    block.querySelectorAll('button[data-type="choice"]').forEach(btn=>{
-      btn.addEventListener('click',()=>{
-        progress[id] = progress[id] || {answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null};
-        progress[id].answers[fieldKey] = btn.dataset.value;
-        saveProgress();
-        block.querySelectorAll('button[data-type="choice"]').forEach(b=>b.classList.toggle('active', b===btn));
-        updateMCReady();
+  function bindChoiceFields(id, c){
+    document.querySelectorAll('[data-field-type="choice"]').forEach(block=>{
+      const fieldKey = block.getAttribute('data-field-block');
+      block.querySelectorAll('button[data-type="choice"]').forEach(btn=>{
+        btn.addEventListener('click',()=>{
+          progress[id] = progress[id] || {answers:{}};
+          progress[id].answers[fieldKey] = btn.dataset.value;
+          saveProgress();
+          block.querySelectorAll('button[data-type="choice"]').forEach(b=>b.classList.toggle('active', b===btn));
+          renderCaseList();
+          updateStats();
+        });
       });
     });
-  });
 
   document.querySelectorAll('[data-field-type="st"]').forEach(block=>{
-    const fieldKey = block.getAttribute('data-field-block');
-    const yesBtn = block.querySelector('button[data-value="Ja"]');
-    const noBtn = block.querySelector('button[data-value="Nein"]');
-    const ensureProgress = ()=>{
-      progress[id] = progress[id] || {answers:{}, choice:null, checked:false, locked:false, attempts:0, lastOk:null};
-      if(!progress[id].answers[fieldKey]){ progress[id].answers[fieldKey] = {choice:'', leads:[]}; }
-    };
-    const setChoice = (choice)=>{
-      ensureProgress();
-      const current = progress[id].answers[fieldKey];
-      const leads = choice === 'Ja' ? (current.leads || []) : [];
-      progress[id].answers[fieldKey] = { choice, leads };
-      saveProgress();
-      if(choice === 'Nein' || (choice === 'Ja' && !block.querySelector('.lead-grid'))){
-        openCase(id);
-        return;
-      }
-      yesBtn?.classList.toggle('active', choice==='Ja');
-      noBtn?.classList.toggle('active', choice==='Nein');
-      updateLeadInfo(block, leads);
-      updateMCReady();
-    };
-    yesBtn?.addEventListener('click', ()=> setChoice('Ja'));
-    noBtn?.addEventListener('click', ()=> setChoice('Nein'));
+      const fieldKey = block.getAttribute('data-field-block');
+      const yesBtn = block.querySelector('button[data-value="Ja"]');
+      const noBtn = block.querySelector('button[data-value="Nein"]');
+      const ensureProgress = ()=>{
+        progress[id] = progress[id] || {answers:{}};
+        if(!progress[id].answers[fieldKey]){ progress[id].answers[fieldKey] = {choice:'', leads:[]}; }
+      };
+      const setChoice = (choice)=>{
+        ensureProgress();
+        const current = progress[id].answers[fieldKey];
+        const leads = choice === 'Ja' ? (current.leads || []) : [];
+        progress[id].answers[fieldKey] = { choice, leads };
+        saveProgress();
+        if(choice === 'Nein' || (choice === 'Ja' && !block.querySelector('.lead-grid'))){
+          renderCaseList();
+          updateStats();
+          openCase(id);
+          return;
+        }
+        yesBtn?.classList.toggle('active', choice==='Ja');
+        noBtn?.classList.toggle('active', choice==='Nein');
+        updateLeadInfo(block, leads);
+        renderCaseList();
+        updateStats();
+      };
+      yesBtn?.addEventListener('click', ()=> setChoice('Ja'));
+      noBtn?.addEventListener('click', ()=> setChoice('Nein'));
 
     block.querySelectorAll('[data-lead]').forEach(btn=>{
       btn.addEventListener('click',()=>{
@@ -588,50 +490,60 @@ function bindChoiceFields(id, c){
         const lead = btn.dataset.lead;
         const leads = new Set(entry.leads||[]);
         leads.has(lead) ? leads.delete(lead) : leads.add(lead);
-        entry.leads = Array.from(leads);
-        progress[id].answers[fieldKey] = entry;
-        saveProgress();
-        btn.classList.toggle('active');
-        updateLeadInfo(block, entry.leads);
-        updateMCReady();
+          entry.leads = Array.from(leads);
+          progress[id].answers[fieldKey] = entry;
+          saveProgress();
+          btn.classList.toggle('active');
+          updateLeadInfo(block, entry.leads);
+          renderCaseList();
+          updateStats();
+        });
       });
     });
-  });
-}
+  }
 
-function updateLeadInfo(block, leads){
-  const note = block.querySelector('.small-note');
-  if(!note) return;
-  note.textContent = (leads && leads.length) ? `Ausgewählt: ${leads.join(', ')}` : 'Bitte wähle mindestens eine Ableitung.';
-}
+  function updateLeadInfo(block, leads){
+    const note = block.querySelector('.small-note');
+    if(!note) return;
+    note.textContent = (leads && leads.length) ? `Ausgewählt: ${leads.join(', ')}` : 'Bitte wähle mindestens eine Ableitung.';
+  }
+
+  function formatStAnswer(val){
+    if(!val) return '';
+    if(typeof val === 'string') return val;
+    if(val.choice === 'Nein') return 'Nein';
+    if(val.choice === 'Ja'){
+      const leads = Array.isArray(val.leads) ? val.leads.filter(Boolean) : [];
+      return leads.length ? `Ja: ${leads.join(', ')}` : 'Ja';
+    }
+    return '';
+  }
 
 function defaultFields(){
   return [
     {key:'elektromechanik', label:'Elektrische und mechanische Aktivität vorhanden?', fixed:true, fixedValue:'Ja – 50mm/s Schreibgeschwindigkeit'},
     {key:'ventr_frequenz', label:'Ventrikuläre Frequenz (∕min)', placeholder:'z. B. 78∕min'},
-    {key:'qrs_rhythmik', label:'QRS-Komplexe: rhythmisch oder arrhythmisch?', placeholder:'rhythmisch oder arrhythmisch?'},
-    {key:'qrs_breite', label:'QRS-Komplexe: schmal oder breit?', type:'choice', options:['schmal','breit']},
-    {key:'vorhofaktivitaet', label:'Vorhofaktivität vorhanden?', type:'choice', options:['Ja','Nein']},
-    {key:'av_kopplung', label:'Kopplung zwischen Vorhof und Kammer?', type:'choice', options:['Ja','Nein']},
-    {key:'st_strecke', label:'ST-Streckenhebung?', type:'st'}
-  ];
-}
+      {key:'qrs_rhythmik', label:'QRS-Komplexe: rhythmisch oder arrhythmisch?', placeholder:'rhythmisch oder arrhythmisch?'},
+      {key:'qrs_breite', label:'QRS-Komplexe: schmal oder breit?', type:'choice', options:['schmal','breit']},
+      {key:'vorhofaktivitaet', label:'Vorhofaktivität vorhanden?', type:'choice', options:['Ja','Nein']},
+      {key:'av_kopplung', label:'Kopplung zwischen Vorhof und Kammer?', type:'choice', options:['Ja','Nein']},
+      {key:'st_strecke', label:'ST-Streckenhebung?', type:'st'},
+      {key:'interpretation', label:'Zusammenfassende Interpretation', placeholder:'Freitext: z. B. Diagnose, Differenzialdiagnosen, weitere Schritte'}
+    ];
+  }
 
 function loadCases(json){
   try{
     if(!Array.isArray(json)){ showBanner('JSON muss ein Array sein.','error'); return; }
-    const mapped = json.map((c,i)=>({
-      id: c.id ?? (`case_${Date.now()}_${i}`),
-      title: c.title ?? `EKG Fall ${i+1}`,
-      intro: c.intro ?? '',
-      // NEU: Mehrbild-Unterstützung (images-Array) + Fallback auf image-String
-      images: Array.isArray(c.images) ? c.images : (c.image ? [c.image] : []),
-      image: c.image ?? '',
-      fields: (c.fields && c.fields.length)? c.fields : defaultFields(),
-      options: Array.isArray(c.options)? c.options : [],
-      correct: c.correct ?? 'A',
-      solution: c.solution ?? ''
-    }));
+      const mapped = json.map((c,i)=>({
+        id: c.id ?? (`case_${Date.now()}_${i}`),
+        title: c.title ?? `EKG Fall ${i+1}`,
+        intro: c.intro ?? '',
+        // NEU: Mehrbild-Unterstützung (images-Array) + Fallback auf image-String
+        images: Array.isArray(c.images) ? c.images : (c.image ? [c.image] : []),
+        image: c.image ?? '',
+        fields: (c.fields && c.fields.length)? c.fields : defaultFields()
+      }));
     allCases = mapped;
     renderCaseList();
     updateStats();
@@ -652,17 +564,13 @@ function buildExportHTML(prof){
   <style>body{font-family:Arial,sans-serif;margin:20px}h1{font-size:20px}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #999;padding:6px 10px;text-align:left}th{background:#eee}.ok{color:green;font-weight:bold}.err{color:red;font-weight:bold}</style>
   </head><body>`;
   html += `<h1>EKG-Auswertung</h1><p><strong>Name:</strong> ${escapeHtml(prof?.name||'')}<br><strong>Klasse:</strong> ${escapeHtml(prof?.klasse||'')}<br><strong>Exportiert am:</strong> ${dateStr}, ${timeStr}</p>`;
-  html += `<table><tr><th>Fall-ID</th><th>Titel</th><th>Frequenz</th><th>Rhythmik</th><th>QRS-Breite</th><th>Vorhofaktivität</th><th>AV-Kopplung</th><th>ST-Strecke</th><th>Schüler-MC</th><th>Richtig/Falsch</th><th>Korrekte Lösung</th><th>Versuche</th></tr>`;
-  allCases.forEach(c=>{
-    const p = progress[c.id]||{};
-    if(!p.checked) return;
-    const ans = p.answers||{};
-    const choice = p.choice||'';
-    const ok = choice === (c.correct||'A');
-    html += `<tr><td>${escapeHtml(c.id)}</td><td>${escapeHtml(c.title)}</td>
-    <td>${escapeHtml(ans.ventr_frequenz)}</td><td>${escapeHtml(ans.qrs_rhythmik)}</td><td>${escapeHtml(ans.qrs_breite)}</td><td>${escapeHtml(ans.vorhofaktivitaet)}</td><td>${escapeHtml(ans.av_kopplung)}</td><td>${escapeHtml(ans.st_strecke)}</td>
-    <td>${escapeHtml(choice)}</td><td class="${ok?'ok':'err'}">${ok?'Richtig':'Falsch'}</td><td>${escapeHtml(c.correct)}</td><td>${escapeHtml(p.attempts||1)}</td></tr>`;
-  });
+    html += `<table><tr><th>Fall-ID</th><th>Titel</th><th>Frequenz</th><th>Rhythmik</th><th>QRS-Breite</th><th>Vorhofaktivität</th><th>AV-Kopplung</th><th>ST-Strecke</th><th>Zusammenfassende Interpretation</th></tr>`;
+    allCases.forEach(c=>{
+      if(!hasAnswers(c)) return;
+      const ans = (progress[c.id]?.answers)||{};
+      html += `<tr><td>${escapeHtml(c.id)}</td><td>${escapeHtml(c.title)}</td>
+      <td>${escapeHtml(ans.ventr_frequenz)}</td><td>${escapeHtml(ans.qrs_rhythmik)}</td><td>${escapeHtml(ans.qrs_breite)}</td><td>${escapeHtml(ans.vorhofaktivitaet)}</td><td>${escapeHtml(ans.av_kopplung)}</td><td>${escapeHtml(formatStAnswer(ans.st_strecke))}</td><td>${escapeHtml(ans.interpretation)}</td></tr>`;
+    });
   html += `</table></body></html>`;
   return html;
 }
