@@ -304,20 +304,34 @@ const els = {
 };
 
 /* ========= Firebase (online Speicherung) ========= */
+// Firebase Web-Konfiguration (bereitgestellt)
 const firebaseConfig = window.FIREBASE_CONFIG || {
-  apiKey: '',
-  authDomain: '',
-  projectId: '',
-  appId: '',
+  apiKey: 'AIzaSyBi_FTaRZQDp6CK82VnvvR_B_4bi10WJDY',
+  authDomain: 'musabachelor-ekg.firebaseapp.com',
+  projectId: 'musabachelor-ekg',
+  storageBucket: 'musabachelor-ekg.firebasestorage.app',
+  messagingSenderId: '987763555706',
+  appId: '1:987763555706:web:7b7a5206c1bae20512eac3',
+  measurementId: 'G-G619CFWZG3',
 };
-const FIREBASE_COLLECTION = 'ekg_submissions';
+const FIREBASE_COLLECTION = 'MusaBachelor-EKG-Datensätze';
 const SUBMISSION_COUNTER_KEY = 'ekgSubmissionCounter';
+const SESSION_ID_KEY = 'ekgSessionUuid';
+const CLOUD_FUNCTION_NAME = 'MusaBachelor-EKG-Datensätze-Sequence';
 let firebaseApp = null;
 let firestoreDb = null;
 let isSyncInFlight = false;
 
 function hasFirebaseConfig(cfg){
   return !!(cfg && cfg.apiKey && cfg.projectId && cfg.appId);
+}
+
+function ensureSessionId(){
+  const existing = localStorage.getItem(SESSION_ID_KEY);
+  if(existing){ return existing; }
+  const uuid = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  localStorage.setItem(SESSION_ID_KEY, uuid);
+  return uuid;
 }
 
 function renderSyncStatus(state){
@@ -361,6 +375,7 @@ function buildSubmissionPayload(){
       title: c.title,
       submitted: !!entry.submitted,
       submittedAt: entry.submittedAt || null,
+      submittedAtTs: entry.submittedAt ? firebase.firestore.Timestamp.fromDate(new Date(entry.submittedAt)) : null,
       answers: entry.answers || {},
     };
   });
@@ -376,14 +391,22 @@ function buildSubmissionPayload(){
     interpretation: row.answers?.interpretation ?? '',
     submitted: row.submitted,
     submittedAt: row.submittedAt,
+    submittedAtTs: row.submittedAtTs,
   }));
   return {
-    createdAt: new Date().toISOString(),
+    sessionId: ensureSessionId(),
+    createdAt: firebase.firestore.Timestamp.now(),
     cases,
+    nestedCases: cases,
     tableRows,
+    flatTableRows: tableRows,
     completedCases: cases.filter(x=>x.submitted).length,
     allSubmitted: cases.length ? cases.every(x=>x.submitted) : false,
     screening: {...qAnswers},
+    formats: {
+      nested: 'nestedCases',
+      tabular: 'flatTableRows',
+    },
   };
 }
 
@@ -401,9 +424,13 @@ async function syncAllSubmissions(manual=false){
     const profile = await loadProfile();
     payload.profileStatus = profile?.status || 'unknown';
     payload.submissionNumber = nextSubmissionNumber();
-    await db.collection(FIREBASE_COLLECTION).add({
+    payload.cloudFunction = CLOUD_FUNCTION_NAME;
+    payload.sessionDocId = payload.sessionId;
+    const docRef = db.collection(FIREBASE_COLLECTION).doc(payload.sessionId);
+    await docRef.set({
       ...payload,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      clientCreatedAt: payload.createdAt,
     });
     progress.__syncAllSent = payload.allSubmitted;
     saveProgress();
