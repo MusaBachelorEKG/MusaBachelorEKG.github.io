@@ -51,6 +51,7 @@
     .btn-accent{background:var(--accent);color:#04182d}
     .btn-success{background:var(--accent-2);color:#052e16}
     .btn-ghost{background:transparent;border:1px solid var(--line)}
+    .btn-ghost[disabled]{opacity:.55;cursor:not-allowed;box-shadow:none;transform:none}
     .btn-danger{background:var(--danger);color:#fff}
 
     .badge{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#0b2146;border:1px solid var(--line);color:var(--muted);font-size:12px}
@@ -238,7 +239,8 @@ Sie können nun das Fenster schließen.
 
 Liebe Grüße
 Abed El Rahim, Musa</p>
-      <div class="actions" style="justify-content:center">
+      <div class="actions" style="justify-content:center;gap:10px;flex-wrap:wrap">
+        <button type="button" class="btn-ghost" id="endRestart">Neu starten</button>
         <button type="button" class="btn-ghost" id="endClose">Schließen</button>
       </div>
     </div>
@@ -322,7 +324,7 @@ async function loadProfile(){
 function clearProfile(){ localStorage.removeItem(PROFILE_KEY); }
 
 /* ========= Elemente ========= */
-const els = {
+  const els = {
   list: document.getElementById('caseList'),
   view: document.getElementById('caseView'),
   showCases: document.getElementById('showCases'),
@@ -346,6 +348,7 @@ const els = {
   endTitle: document.getElementById('endTitle'),
   endSubtitle: document.getElementById('endSubtitle'),
   endClose: document.getElementById('endClose'),
+  endRestart: document.getElementById('endRestart'),
   earlySyncOverlay: document.getElementById('earlySyncOverlay'),
   earlySyncContinue: document.getElementById('earlySyncContinue'),
   earlySyncConfirm: document.getElementById('earlySyncConfirm'),
@@ -370,6 +373,7 @@ let firebaseApp = null;
 let firestoreDb = null;
 let isSyncInFlight = false;
 let firebaseAnalytics = null;
+let syncDisabled = false;
 
 function hasFirebaseConfig(cfg){
   return !!(cfg && cfg.apiKey && cfg.projectId && cfg.appId);
@@ -385,12 +389,21 @@ function ensureSessionId(){
 
 function renderSyncStatus(state){
   if(!els.syncStatus) return;
+  if(syncDisabled){
+    els.syncStatus.textContent = 'Online Sync: deaktiviert';
+    els.syncStatus.style.color = 'var(--muted)';
+    els.syncStatus.style.borderColor = 'var(--line)';
+    els.syncNow.disabled = true;
+    return;
+  }
   if(!hasFirebaseConfig(firebaseConfig)){
     els.syncStatus.textContent = 'Online Sync: nicht konfiguriert';
     els.syncStatus.style.color = 'var(--muted)';
     els.syncStatus.style.borderColor = 'var(--line)';
+    els.syncNow.disabled = true;
     return;
   }
+  els.syncNow.disabled = false;
   const sentAll = !!progress.__syncAllSent;
   const isError = state === 'error';
   els.syncStatus.textContent = sentAll ? 'Online Sync: übermittelt' : 'Online Sync: bereit';
@@ -484,6 +497,10 @@ function hideEarlySyncPrompt(){
 }
 
 async function syncAllSubmissions(manual=false, force=false){
+  if(syncDisabled){
+    showBanner('Online-Speicherung ist deaktiviert.', 'warn');
+    return;
+  }
   const db = ensureFirebase();
   if(!db){
     showBanner('Firebase ist nicht eingerichtet. Bitte Konfigurationsdaten eintragen.', 'warn');
@@ -564,6 +581,25 @@ function hideEndScreen(){
   if(!els.endOverlay) return;
   els.endOverlay.classList.add('hidden');
   unlockScroll();
+}
+
+function clearCachesForRestart(){
+  syncDisabled = true;
+  els.syncNow.disabled = true;
+  renderSyncStatus('disabled');
+  localStorage.removeItem(LS_KEY);
+  localStorage.removeItem(SESSION_ID_KEY);
+  localStorage.removeItem(SUBMISSION_COUNTER_KEY);
+  clearProfile();
+  Object.keys(progress).forEach((k) => delete progress[k]);
+}
+
+function restartSession(){
+  clearCachesForRestart();
+  showBanner('Daten wurden zurückgesetzt. Die Seite wird neu geladen.');
+  setTimeout(() => {
+    window.location.reload();
+  }, 250);
 }
 
 /* ========= Fälle/Progress ========= */
@@ -666,9 +702,9 @@ function buildImagesHTML(c){
           return `<div data-field-block="${f.key}" data-field-type="st"><div class="small">${f.label}</div><div class="choice-row"><button type="button" class="btn-ghost ${yesActive}" data-value="Ja" ${dis}>Ja</button><button type="button" class="btn-ghost ${noActive}" data-value="Nein" ${dis}>Nein</button></div>${leadBlock}</div>`;
         }
         if(f.type === 'number'){
-          const numVal = typeof val === 'number' || (typeof val === 'string' && val.trim() !== '') ? val : '';
-          return `<div><div class="small">${f.label}</div><input type="number" inputmode="numeric" pattern="[0-9]*" min="${f.min ?? 0}" max="${f.max ?? 230}" ${dis} data-key="${f.key}" data-type="number" placeholder="${f.placeholder||''}" value="${numVal}"></div>`;
-        }
+        const numVal = typeof val === 'number' || (typeof val === 'string' && val.trim() !== '') ? val : '';
+        return `<div><div class="small">${f.label}</div><input type="number" inputmode="numeric" pattern="[0-9]*" min="${f.min ?? 0}" max="${f.max ?? 230}" ${dis} data-key="${f.key}" data-type="number" placeholder="${f.placeholder||''}" value="${numVal}"></div>`;
+      }
         const textVal = typeof val === 'string' ? val : '';
         return `<div><div class="small">${f.label}</div><textarea ${dis} data-key="${f.key}" placeholder="${f.placeholder||''}">${textVal}</textarea></div>`;
       }).join('');
@@ -707,6 +743,15 @@ function buildImagesHTML(c){
       const imgEls = els.view.querySelectorAll('.imgbox img');
       imgEls.forEach(img => img.addEventListener('click', ()=> openImgViewer(img.src)));
 
+      const submitBtn = document.getElementById('submitCase');
+      const updateSubmitButtonState = ()=>{
+        if(!submitBtn) return;
+        const interpretationVal = progress[id]?.answers?.interpretation;
+        const hasInterpretation = typeof interpretationVal === 'string' && interpretationVal.trim().length > 0;
+        submitBtn.disabled = isSubmitted || !hasInterpretation;
+      };
+      updateSubmitButtonState();
+
       els.explanationBox.style.display = 'none';
       els.explanationText.textContent = '';
 
@@ -738,11 +783,13 @@ function buildImagesHTML(c){
           saveProgress();
           renderCaseList();
           updateStats();
+          if(key === 'interpretation'){
+            updateSubmitButtonState();
+          }
         });
       });
       bindChoiceFields(id, c);
 
-      const submitBtn = document.getElementById('submitCase');
       if(submitBtn){
         submitBtn.addEventListener('click', ()=>{
           progress[id] = progress[id] || {answers:{}};
@@ -852,7 +899,7 @@ function defaultFields(){
       {key:'vorhofaktivitaet', label:'Vorhofaktivität vorhanden?', type:'choice', options:['Ja','Nein']},
       {key:'av_kopplung', label:'Kopplung zwischen Vorhof und Kammer?', type:'choice', options:['Ja','Nein']},
       {key:'st_strecke', label:'ST-Streckenhebung?', type:'st'},
-      {key:'interpretation', label:'Zusammenfassende Interpretation', placeholder:'Freitext: z. B. Diagnose, Differenzialdiagnosen, weitere Schritte'}
+      {key:'interpretation', label:'Zusammenfassende Interpretation', placeholder:'Hast du eine oder mehrere Diagnosen die du siehst, trag sie hier ein.'}
     ];
   }
 
@@ -881,6 +928,7 @@ function loadCases(json){
 /* ========= Event Handler ========= */
 els.endClose?.addEventListener('click', hideEndScreen);
 els.endOverlay?.addEventListener('click', e=>{ if(e.target === els.endOverlay){ hideEndScreen(); } });
+els.endRestart?.addEventListener('click', restartSession);
 els.earlySyncContinue?.addEventListener('click', ()=>{ hideEarlySyncPrompt(); showBanner('Bitte bearbeite möglichst alle 5 Fälle vor der Abgabe.', 'warn'); });
 els.earlySyncConfirm?.addEventListener('click', ()=>{ hideEarlySyncPrompt(); syncAllSubmissions(true, true); });
 els.earlySyncOverlay?.addEventListener('click', e=>{ if(e.target === els.earlySyncOverlay){ hideEarlySyncPrompt(); } });
